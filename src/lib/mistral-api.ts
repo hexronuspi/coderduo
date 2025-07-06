@@ -64,6 +64,25 @@ export async function chatWithMistral(
       try {
         errorData = await response.json();
         console.error(`Mistral API error: ${response.status}`, errorData);
+        
+        // Special handling for authentication errors
+        if (response.status === 401) {
+          console.error('Authentication error details:', errorData);
+          
+          // If this has a code that suggests session expiry, we should redirect to login
+          if (errorData?.code === 'auth/session-expired') {
+            console.error('Session expired or invalid - user needs to re-authenticate');
+            
+            // If we're in a browser environment, we can handle the redirection
+            if (typeof window !== 'undefined') {
+              // Store current page for redirect back after login
+              localStorage.setItem('auth_redirect', window.location.pathname);
+              
+              // Show authentication error message
+              throw new Error('Authentication Error\nThere\'s an issue with your session. You may need to sign in again to continue using the chat feature.');
+            }
+          }
+        }
       } catch (jsonError) {
         console.error(`Failed to parse error response from API: ${response.statusText}`, jsonError);
         errorData = { error: `API error: ${response.status} ${response.statusText}` };
@@ -74,7 +93,12 @@ export async function chatWithMistral(
         onBusyKeysUpdate(errorData.busyKeyCount);
       }
       
-      throw new Error(errorData.error || `API error: ${response.status}`);
+      // If it's an authentication error, provide a clearer message
+      if (response.status === 401) {
+        throw new Error(errorData.message || 'Authentication Error\nThere\'s an issue with your session. You may need to sign in again to continue using the chat feature.');
+      } else {
+        throw new Error(errorData.error || `API error: ${response.status}`);
+      }
     }
     
     let data;
@@ -196,7 +220,7 @@ This usually means the API keys are not properly configured on the server.
 
 If you are the administrator:
 1. Make sure you've added valid Mistral API keys to your Vercel environment variables
-2. Check that the keys are named correctly (MISTRAL or MISTRAL1-9)
+2. Check that the keys are named correctly (MISTRAL0_API_KEY to MISTRAL9_API_KEY)
 3. Verify the API keys are working by testing them directly
 4. Redeploy the application after setting the keys`;
       

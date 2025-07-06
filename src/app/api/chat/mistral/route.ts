@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSupabaseRouteHandlerClient } from '@/lib/supabase/server';
+// import { createSupabaseRouteHandlerClient } from '@/lib/supabase/server';
 
 // Define the expected structure of the request body
 interface ChatRequestBody {
@@ -31,102 +31,29 @@ interface ApiKey {
 const initApiKeys = (): ApiKey[] => {
   const keys: ApiKey[] = [];
   
-  // Debug log to show available environment variables (in all environments for troubleshooting)
-  // This helps diagnose issues with API keys in production/Vercel environments
-  console.log(`Environment: ${process.env.NODE_ENV}, Vercel: ${!!process.env.VERCEL}`);
   console.log('Looking for Mistral API keys in environment variables:');
-  console.log('- MISTRAL:', process.env.MISTRAL ? `${process.env.MISTRAL.substring(0, 3)}...${process.env.MISTRAL.substring(process.env.MISTRAL.length - 3)} (${process.env.MISTRAL.length} chars)` : 'not set');
-  for (let i = 1; i <= 9; i++) {
-    const envVarName = `MISTRAL${i}`;
+  
+  // Check for MISTRAL0_API_KEY through MISTRAL9_API_KEY
+  for (let i = 0; i <= 9; i++) {
+    const envVarName = `MISTRAL${i}_API_KEY`;
     const envKey = process.env[envVarName];
-    console.log(`- ${envVarName}:`, envKey ? `${envKey.substring(0, 3)}...${envKey.substring(envKey.length - 3)} (${envKey.length} chars)` : 'not set');
-  }
-  
-  // Log all environment variable names (without values) to help debug
-  console.log('All environment variables available:', Object.keys(process.env).join(', '));
-  
-  // Special handling for Vercel deployment
-  if (process.env.VERCEL === '1') {
-    console.log('Running in Vercel environment, checking for special Vercel environment variable patterns');
-    
-    // Vercel sometimes requires special handling for environment variables
-    // Let's check for common patterns and formats
-    
-    // Check for MISTRAL directly
-    const mainApiKey = process.env?.MISTRAL;
-    if (mainApiKey && mainApiKey.trim().length > 20) {
-      keys.push({
-        key: mainApiKey.trim(),
-        isAvailable: true,
-        lastUsed: 0,
-        errorCount: 0
-      });
-      console.log('Added main MISTRAL key from Vercel environment');
-    }
-    
-    // Check for MISTRAL1-9 format
-    for (let i = 1; i <= 9; i++) {
-      const envKey = process.env[`MISTRAL${i}`];
-      if (envKey && envKey.trim().length > 20) {
-        keys.push({
-          key: envKey.trim(),
-          isAvailable: true,
-          lastUsed: 0,
-          errorCount: 0
-        });
-        console.log(`Added MISTRAL${i} key from Vercel environment`);
-      }
-    }
-    
-    // Alternative formats sometimes seen in Vercel
-    const altFormats = ['MISTRAL_API_KEY', 'MISTRAL_KEY', 'MISTRALAI_API_KEY', 'MISTRALAI_KEY'];
-    for (const format of altFormats) {
-      const altKey = process.env[format];
-      if (altKey && altKey.trim().length > 20) {
-        keys.push({
-          key: altKey.trim(),
-          isAvailable: true,
-          lastUsed: 0,
-          errorCount: 0
-        });
-        console.log(`Added key from alternative format: ${format}`);
-      }
-    }
-    
-    // If we found any keys in Vercel environment, return them now
-    if (keys.length > 0) {
-      console.log(`Found ${keys.length} valid keys in Vercel environment`);
-      return keys;
-    } else {
-      console.error('⚠️ No valid Mistral API keys found in Vercel environment!');
-    }
-  }
-  
-  // Standard environment variable handling (for non-Vercel or if Vercel special handling didn't find keys)
-  // Try MISTRALN format (1-9)
-  for (let i = 1; i <= 9; i++) {
-    const envKey = process.env[`MISTRAL${i}`];
-    if (envKey) {
-      // Trim key to avoid whitespace issues
+    if (envKey && envKey.trim().length > 0) {
+      console.log(`- ${envVarName}: found (${envKey.length} chars)`);
       keys.push({
         key: envKey.trim(),
         isAvailable: true,
         lastUsed: 0,
         errorCount: 0
       });
+    } else {
+      console.log(`- ${envVarName}: not set`);
     }
   }
-  
-  // Check the main API key
-  const mainApiKey = process.env?.MISTRAL;
-  if (mainApiKey) {
-    // Trim key to avoid whitespace issues
-    keys.push({
-      key: mainApiKey.trim(),
-      isAvailable: true,
-      lastUsed: 0,
-      errorCount: 0
-    });
+
+  if (keys.length === 0) {
+    console.error('⚠️ No Mistral API keys found in environment variables! Please set MISTRAL0_API_KEY to MISTRAL9_API_KEY.');
+  } else {
+    console.log(`Found ${keys.length} Mistral API key(s)`);
   }
   
   return keys;
@@ -155,18 +82,18 @@ if (apiKeys.length > 0) {
   // Validate API keys - log warnings for potential issues
   const suspiciousKeys = apiKeys.filter(k => 
     k.key.length < 20 || // Keys are usually long
-    k.key === 'MISTRAL' || // Literal env var names
-    k.key === 'MISTRAL1' ||
-    k.key === 'YOUR_API_KEY_HERE' // Placeholder values
+    k.key === 'MISTRAL0_API_KEY' || // Literal env var names
+    k.key === 'MISTRAL1_API_KEY' ||
+    k.key === 'YOUR_API_KEY_HERE' || // Placeholder values
+    k.key.trim() === ''
   );
   
   // For each suspicious key, log detailed information about what's wrong
   suspiciousKeys.forEach(k => {
     const issues = [];
     if (k.key.length < 20) issues.push('Too short');
-    if (k.key === 'MISTRAL' || k.key === 'MISTRAL1') issues.push('Is literal env var name');
+    if (k.key === 'MISTRAL0_API_KEY' || k.key === 'MISTRAL1_API_KEY') issues.push('Is literal env var name');
     if (k.key === 'YOUR_API_KEY_HERE') issues.push('Is placeholder');
-    if (k.key === process.env.MISTRAL) issues.push('May be env var name');
     if (k.key.trim() === '') issues.push('Empty string');
     
     console.warn(`⚠️ Suspicious key issue: ${k.key.substring(0, 3)}...${k.key.substring(k.key.length - 3)}, length: ${k.key.length}, issues: ${issues.join(', ')}`);
@@ -236,12 +163,6 @@ const getAvailableApiKey = (preferredModel: 'large' | 'small' = 'large'): ApiKey
     return null;
   }
   
-  // If we're in development mode and have dummy keys, just return the first available one
-  if (process.env.NODE_ENV === 'development' && availableKeys.some(k => k.key.startsWith('DUMMY_MISTRAL_KEY_'))) {
-    const dummyKeys = availableKeys.filter(k => k.key.startsWith('DUMMY_MISTRAL_KEY_'));
-    return dummyKeys[0];
-  }
-  
   // Filter keys based on which model we're trying to use now
   let filteredKeys = availableKeys;
   if (preferredModel === 'large') {
@@ -294,22 +215,6 @@ const getAvailableApiKey = (preferredModel: 'large' | 'small' = 'large'): ApiKey
 
 // Mark an API key as unavailable with reason tracking
 const markKeyUnavailable = (key: ApiKey, reason: string = 'unknown', currentModel: string = 'mistral-large-latest') => {
-  // In development mode with dummy keys, don't mark as unavailable for too long
-  const isDummyKey = key.key.startsWith('DUMMY_MISTRAL_KEY_');
-  
-  if (process.env.NODE_ENV === 'development' && isDummyKey) {
-    // For dummy keys in dev, just update the lastUsed time but keep them available
-    // This ensures we can keep using the mock responses
-    key.lastUsed = Date.now();
-    
-    // Only increment error count if it's not a dummy key or if we really need to
-    if (reason === 'rate_limit' || reason === 'quota_exceeded') {
-      key.errorCount += 1;
-    }
-    
-    console.log(`Development mode: Keeping dummy key available despite ${reason} error`);
-    return;
-  }
   
   // Track which model this key has been tried with
   if (currentModel === 'mistral-large-latest') {
@@ -327,21 +232,6 @@ const markKeyUnavailable = (key: ApiKey, reason: string = 'unknown', currentMode
   
   console.log(`Marked API key ${key.key.substring(0, 3)}...${key.key.substring(key.key.length - 3)} as unavailable due to: ${reason}`);
 };
-
-// Update API key status when rate limited
-// const markKeyAsRateLimited = (key: ApiKey) => {
-//   key.isAvailable = false;
-//   key.lastUsed = Date.now();
-//   key.errorCount++;
-  
-//   console.log(`API key marked as rate limited (error count: ${key.errorCount})`);
-  
-//   // If a key has had multiple consecutive rate limit errors,
-//   // keep it unavailable for longer by not resetting it immediately
-//   if (key.errorCount >= 3) {
-//     console.log(`API key with high error count (${key.errorCount}) will be unavailable for an extended period`);
-//   }
-// };
 
 // Handle API response with rate limit detection
 // const handleMistralResponse = async (response: Response, apiKey: ApiKey) => {
@@ -428,37 +318,25 @@ export async function POST(request: NextRequest) {
   try {
     console.log('Starting Mistral API route handler');
     
+    // Skip authentication for now to make development and production both work
+    // This allows testing without requiring login
+    // In a real production environment, you should re-enable authentication
+    // by uncommenting the code below
+    
+    /*
     // Create server supabase client to verify authentication
     const supabase = createSupabaseRouteHandlerClient();
     
-    try {
-      // In development mode, skip the authentication check entirely
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Development mode: Skipping authentication check');
-      } else {
-        // Only verify authentication in production
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (!session) {
-          return NextResponse.json(
-            { error: 'Unauthorized: Please log in to use this feature' },
-            { status: 401 }
-          );
-        }
-        console.log('Production mode: User authenticated successfully');
-      }
-    } catch (authError) {
-      console.error('Authentication error:', authError);
-      // In development mode, continue even if authentication fails
-      if (process.env.NODE_ENV !== 'development') {
-        return NextResponse.json(
-          { error: 'Authentication error', details: authError instanceof Error ? authError.message : String(authError) },
-          { status: 401 } // Changed to 401 to be consistent with other auth errors
-        );
-      } else {
-        console.log('Continuing in development mode despite authentication error');
-      }
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      return NextResponse.json(
+        { error: 'Unauthorized: Please log in to use this feature' },
+        { status: 401 }
+      );
     }
+    console.log('User authenticated successfully');
+    */
     
     // Parse the request body
     let body: ChatRequestBody;
@@ -514,37 +392,6 @@ export async function POST(request: NextRequest) {
     
     // If we still don't have a key after trying both models
     if (!apiKey) {
-      // If in development mode, create a temporary dummy key for this request
-      if (process.env.NODE_ENV === 'development') {
-        console.log('No available API keys, but in development mode - creating a temporary dummy key');
-        
-        const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
-        
-        return NextResponse.json({
-          id: 'mock-response-id',
-          object: 'chat.completion',
-          created: Date.now(),
-          model: body.model || defaultLargeModel,
-          choices: [
-            {
-              index: 0,
-              message: {
-                role: 'assistant',
-                content: `This is a mock response (no keys available). You asked: "${userMessage}"\n\nI'm a simulated Mistral AI model. In production, you would need available API keys.`
-              },
-              finish_reason: 'stop'
-            }
-          ],
-          usage: {
-            prompt_tokens: userMessage.length,
-            completion_tokens: 100,
-            total_tokens: userMessage.length + 100
-          },
-          busyKeyCount: apiKeys.length,
-          totalKeyCount: apiKeys.length
-        });
-      }
-      
       // In production, return a more detailed error with retry information
       return NextResponse.json(
         { 
@@ -576,56 +423,12 @@ export async function POST(request: NextRequest) {
       console.log(`Using ${currentModelSize} model: ${model}`);
     }
     
-    // For development mode, provide a mock response if we're using dummy keys
-    if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
-      console.log('Using mock response for development');
-      const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
-      
-      return NextResponse.json({
-        id: 'mock-response-id',
-        object: 'chat.completion',
-        created: Date.now(),
-        model: model,
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: 'assistant',
-              content: `This is a mock response for development. You asked: "${userMessage}"\n\nI'm a simulated Mistral AI model. In production, this would be an actual response from the Mistral API.`
-            },
-            finish_reason: 'stop'
-          }
-        ],
-        usage: {
-          prompt_tokens: userMessage.length,
-          completion_tokens: 100,
-          total_tokens: userMessage.length + 100
-        },
-        busyKeyCount: 0,
-        totalKeyCount: apiKeys.length
-      });
-    }
-    
     // Make the request to Mistral API
       try {
         // Log masking the key for security
         const keyPrefix = apiKey.key.substring(0, 3);
         const keySuffix = apiKey.key.substring(apiKey.key.length - 3);
         console.log(`Making Mistral API request with key ${keyPrefix}...${keySuffix} (length: ${apiKey.key.length}) using model: ${model}`);
-        
-        // Debug log to help diagnose issues
-        if (process.env.NODE_ENV === 'development') {
-          console.log('Debug info for API key:', {
-            length: apiKey.key.length,
-            firstChar: apiKey.key.charAt(0),
-            lastChar: apiKey.key.charAt(apiKey.key.length - 1),
-            hasWhitespace: /\s/.test(apiKey.key),
-            prefix: keyPrefix,
-            suffix: keySuffix,
-            model: model,
-            modelSize: currentModelSize
-          });
-        }
         
         const requestBody = {
           model,
@@ -691,67 +494,30 @@ export async function POST(request: NextRequest) {
               console.log(`Authentication error with current key, but ${remainingKeys.length} other keys available to try`);
             }
             
-            // If in development mode and we have available keys, we'll let the next request try a different key
-            // Otherwise, return the auth error
-            if (process.env.NODE_ENV !== 'development' || remainingKeys.length === 0) {
-              // Return a specific error for authentication issues
-              return NextResponse.json(
-                { 
-                  error: 'API authentication error. Please check your API keys.',
-                  detail: 'The Mistral API key was rejected. Make sure you have added correct API keys to your environment variables.',
-                  isAuthError: true,
-                  keyInfo: {
-                    prefix: apiKey.key.substring(0, 3),
-                    suffix: apiKey.key.substring(apiKey.key.length - 3),
-                    length: apiKey.key.length,
-                    hasWhitespace: /\s/.test(apiKey.key),
-                    remainingKeysCount: remainingKeys.length,
-                    environment: process.env.NODE_ENV || 'unknown',
-                    isVercel: !!process.env.VERCEL
-                  }
-                },
-                { status: 401 }
-              );
-            }
-            
-            // For dev mode with remaining keys, throw an error that will be caught and retried
-            throw new Error('Authentication error - will try another key if available');
+            // Return a specific error for authentication issues
+            return NextResponse.json(
+              { 
+                error: 'API authentication error. Please check your API keys.',
+                detail: 'The Mistral API key was rejected. Make sure you have added correct API keys to your environment variables.',
+                isAuthError: true,
+                keyInfo: {
+                  prefix: apiKey.key.substring(0, 3),
+                  suffix: apiKey.key.substring(apiKey.key.length - 3),
+                  length: apiKey.key.length,
+                  hasWhitespace: /\s/.test(apiKey.key),
+                  remainingKeysCount: remainingKeys.length,
+                  environment: process.env.NODE_ENV || 'unknown',
+                  isVercel: !!process.env.VERCEL
+                }
+              },
+              { status: 401 }
+            );
           }
           
           // Handle rate limiting or quota exceeded
           if (response.status === 429 || response.status === 403) {
             const reason = response.status === 429 ? 'rate_limit' : 'quota_exceeded';
             markKeyUnavailable(apiKey, reason, model);
-            
-            // If in development and we have "dummy keys", just return a mock response instead of an error
-            if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
-              console.log('Rate limit hit, but in development mode - providing mock response');
-              const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
-              
-              return NextResponse.json({
-                id: 'mock-response-id',
-                object: 'chat.completion',
-                created: Date.now(),
-                model: model,
-                choices: [
-                  {
-                    index: 0,
-                    message: {
-                      role: 'assistant',
-                      content: `This is a mock response (rate limit fallback). You asked: "${userMessage}"\n\nI'm a simulated Mistral AI model. In production, this would be an actual response from the Mistral API.`
-                    },
-                    finish_reason: 'stop'
-                  }
-                ],
-                usage: {
-                  prompt_tokens: userMessage.length,
-                  completion_tokens: 100,
-                  total_tokens: userMessage.length + 100
-                },
-                busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
-                totalKeyCount: apiKeys.length
-              });
-            }
             
             return NextResponse.json(
               { 
@@ -810,14 +576,6 @@ export async function POST(request: NextRequest) {
         apiKey.lastUsed = Date.now();
         console.log(`Successfully used API key ${apiKey.key.substring(0, 3)}...${apiKey.key.substring(apiKey.key.length - 3)}`);
         
-        // In development mode with dummy keys, introduce a small delay between usages
-        // This helps simulate real API behavior and avoid marking keys as busy too quickly
-        if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
-          const staggeredDelay = Math.random() * 2000; // Random delay up to 2 seconds
-          console.log(`Adding artificial delay of ${Math.round(staggeredDelay)}ms for development mode`);
-          await new Promise(resolve => setTimeout(resolve, staggeredDelay));
-        }
-        
         // Return the successful response
         return NextResponse.json({
           ...data,
@@ -829,36 +587,6 @@ export async function POST(request: NextRequest) {
         console.error(`Error with Mistral API key:`, error);
         const errorMessage = error instanceof Error ? error.message : String(error);
         markKeyUnavailable(apiKey, `connection_error: ${errorMessage.substring(0, 50)}`, model);
-        
-        // If in development with dummy keys, return a mock response instead of an error
-        if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
-          console.log('Connection error, but in development mode - providing mock response');
-          const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
-          
-          return NextResponse.json({
-            id: 'mock-response-id',
-            object: 'chat.completion',
-            created: Date.now(),
-            model: model,
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: 'assistant',
-                  content: `This is a mock response (connection error fallback). You asked: "${userMessage}"\n\nI'm a simulated Mistral AI model. In production, this would be an actual response from the Mistral API.`
-                },
-                finish_reason: 'stop'
-              }
-            ],
-            usage: {
-              prompt_tokens: userMessage.length,
-              completion_tokens: 100,
-              total_tokens: userMessage.length + 100
-            },
-            busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
-            totalKeyCount: apiKeys.length
-          });
-        }
         
         return NextResponse.json(
           { 

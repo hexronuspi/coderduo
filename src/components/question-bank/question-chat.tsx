@@ -347,7 +347,6 @@ function ChatMessageItem({ message }: { message: ChatMessage }) {
         className="flex-shrink-0"
         size="sm"
         icon={isUser ? undefined : <Sparkles size={16} />}
-        src={isUser ? "/user-avatar.png" : undefined}
         fallback={isUser ? "U" : "AI"}
         classNames={{
           base: isUser 
