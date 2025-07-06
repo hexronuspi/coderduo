@@ -19,12 +19,12 @@ export async function GET(req: NextRequest) {
     // Create a Supabase client for this specific route handler
     const supabase = createRouteHandlerClient({ cookies });
     
-    // Exchange the auth code for a session
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    // Next.js App Router automatically handles the code exchange
+    // We just need to validate the session
+    const { data: { session } } = await supabase.auth.getSession();
     
-    if (error) {
-      console.error('Error exchanging code for session:', error.message);
-      throw error;
+    if (!session) {
+      throw new Error('Failed to get user session after authentication');
     }
     
     console.log('Authentication successful, redirecting to dashboard');

@@ -115,7 +115,7 @@ function AuthContent() {
                   },
                 }}
                 providers={['google']}
-                redirectTo={`${window.location.origin}/auth/callback`}
+                redirectTo={`/auth/callback`}
                 onlyThirdPartyProviders={true}
               />
             )}
