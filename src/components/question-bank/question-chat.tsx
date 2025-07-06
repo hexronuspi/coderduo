@@ -214,7 +214,7 @@ export function QuestionChat({ question }: QuestionChatProps) {
                   <AlertTriangle size={16} />
                   <span className="font-medium">Authentication Error</span>
                 </div>
-                <p>There's an issue with the API authentication. This has been logged for the administrators to fix.</p>
+                <p>There&apos;s an issue with the API authentication. This has been logged for the administrators to fix.</p>
                 <p className="text-xs mt-2 text-danger-500">This is a configuration issue that requires attention from the system administrator.</p>
               </motion.div>
             ) : (
