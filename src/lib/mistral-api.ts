@@ -110,6 +110,7 @@ export async function checkMistralApiConnection(): Promise<{
   message: string;
   environment?: string;
   isVercel?: boolean;
+  serverUrl?: string;
 }> {
   try {
     console.log('Checking Mistral API connection...');
@@ -165,13 +166,50 @@ export async function checkMistralApiConnection(): Promise<{
       environment: process.env.NODE_ENV || 'unknown',
       isVercel: typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
     };
-  } catch (error) {
+  }  catch (error) {
+    // Check if this might be a CORS or network error
+    const errorMessage = error instanceof Error ? error.message : 'Unknown connection error';
+    const possibleCause = 
+      errorMessage.includes('NetworkError') || 
+      errorMessage.includes('CORS') || 
+      errorMessage.includes('Failed to fetch') 
+        ? 'This may be a network or CORS configuration issue.'
+        : '';
+    
     return {
       isConnected: false,
-      message: error instanceof Error ? error.message : 'Unknown connection error',
+      message: `${errorMessage}. ${possibleCause}`,
       environment: process.env.NODE_ENV || 'unknown',
-      isVercel: typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
+      isVercel: typeof window !== 'undefined' && window.location.hostname.includes('vercel.app'),
+      serverUrl: typeof window !== 'undefined' ? window.location.origin : 'unknown'
     };
+  }
+}
+
+// Helper function to format authentication errors for users
+export function formatMistralAuthError(errorType: '401' | '404' | 'unknown'): string {
+  switch (errorType) {
+    case '401':
+      return `Authentication error with Mistral API. 
+        
+This usually means the API keys are not properly configured on the server.
+
+If you are the administrator:
+1. Make sure you've added valid Mistral API keys to your Vercel environment variables
+2. Check that the keys are named correctly (MISTRAL or MISTRAL1-9)
+3. Verify the API keys are working by testing them directly
+4. Redeploy the application after setting the keys`;
+      
+    case '404':
+      return `Resource not found (404 error).
+        
+This could be due to:
+1. Missing prompt files in your deployment
+2. Incorrect API endpoint configuration
+3. Issues with your Vercel deployment`;
+      
+    default:
+      return 'An unexpected error occurred while connecting to the AI service. Please try again later.';
   }
 }
 
@@ -284,12 +322,26 @@ export function useMistralChat(questionTitle: string) {
       // Replace the {query} placeholder with the actual user message
       apiMessages[0].content = apiMessages[0].content.replace('{query}', userMessage);
       
+      // Check if we can fetch the prompt file first
+      try {
+        const promptCheckResponse = await fetch(`${window.location.origin}/data/prompts/mistral.json`, {
+          method: 'HEAD'
+        });
+        if (!promptCheckResponse.ok) {
+          console.error(`Prompt file not accessible: ${promptCheckResponse.status}`);
+          setError(`Cannot access prompt file (${promptCheckResponse.status}). This may indicate a deployment issue.`);
+        }
+      } catch (promptCheckError) {
+        console.error('Error checking prompt file:', promptCheckError);
+      }
+        
       // Implement retry logic with model fallback
       let retries = 0;
       const maxRetries = 3; // Increased to allow for model fallbacks
       let lastError;
       let currentModel = 'mistral-large-latest';
       let modelFallbackAttempted = false;
+      let connectionCheckPerformed = false;
       
       while (retries <= maxRetries) {
         try {
@@ -305,6 +357,24 @@ export function useMistralChat(questionTitle: string) {
             currentModel = 'mistral-small';
             modelFallbackAttempted = true;
             console.log('Falling back to smaller model: mistral-small');
+          }
+          
+          // On the second retry, check API connection to get more detailed error info
+          if (retries === 2 && !connectionCheckPerformed) {
+            console.log('Performing API connection check to diagnose issues...');
+            connectionCheckPerformed = true;
+            try {
+              const connectionStatus = await checkMistralApiConnection();
+              console.log('API connection check result:', connectionStatus);
+              if (!connectionStatus.isConnected) {
+                console.error('API connection check failed:', connectionStatus.message);
+                if (connectionStatus.message.includes('Authentication')) {
+                  setError('Authentication error: API keys not configured correctly in the deployment environment.');
+                }
+              }
+            } catch (connectionError) {
+              console.error('Error during API connection check:', connectionError);
+            }
           }
           
           // Send the request to the API
@@ -353,7 +423,18 @@ export function useMistralChat(questionTitle: string) {
       
     } catch (error) {
       console.error('Error sending message:', error);
-      setError(error instanceof Error ? error.message : 'An unknown error occurred');
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      
+      // Show more specific error messages for common errors
+      if (errorMessage.includes('Authentication') || errorMessage.includes('401')) {
+        setError(formatMistralAuthError('401'));
+      } else if (errorMessage.includes('not found') || errorMessage.includes('404')) {
+        setError(formatMistralAuthError('404'));
+      } else if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
+        setError('Network connection error. Please check your internet connection and try again.');
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setIsLoading(false);
     }

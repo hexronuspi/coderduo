@@ -129,23 +129,6 @@ const initApiKeys = (): ApiKey[] => {
     });
   }
   
-  // If no keys found, add dummy keys for development
-  if (keys.length === 0 && process.env.NODE_ENV === 'development') {
-    console.log('No Mistral API keys found in environment variables. Using dummy keys for development.');
-    console.log('IMPORTANT: These dummy keys will only work for mock responses.');
-    for (let i = 1; i <= 3; i++) {
-      keys.push({
-        key: `DUMMY_MISTRAL_KEY_${i}`,
-        isAvailable: true,
-        lastUsed: 0,
-        errorCount: 0
-      });
-    }
-  } else if (keys.length === 0 && process.env.NODE_ENV === 'production') {
-    console.error('⚠️ PRODUCTION WARNING: No Mistral API keys found in environment variables.');
-    console.error('Please set MISTRAL or MISTRAL1 through MISTRAL9 environment variables.');
-  }
-  
   return keys;
 };
 
