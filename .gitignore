@@ -1,0 +1,134 @@
+# Node.js dependencies
+node_modules/
+.pnp/
+.pnp.js
+.yarn/install-state.gz
+package-lock.json
+yarn.lock
+
+# Build output
+dist/
+build/
+.next/
+out/
+.vercel/
+
+# Coverage & reports
+coverage/
+.nyc_output/
+test-report/
+jest-html-reporters-*
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS & editor specific
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+.idea/
+.vscode/
+*.swp
+
+# Environment variables
+.env
+.env.*
+!.env.example
+.env*.local
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# SSL & certs
+*.pem
+*.crt
+*.key
+
+# Misc
+*.log
+*.tgz
+*.bak
+*.tmp
+*.temp
+*.orig
+
+# Firebase & Supabase (if applicable)
+.supabase/
+.firebase/
+
+# Optional: Ignore uploads or user-generated data
+public/uploads/
+public/temp/
+# Node.js dependencies
+node_modules/
+.pnp/
+.pnp.js
+.yarn/install-state.gz
+package-lock.json
+yarn.lock
+
+# Build output
+dist/
+build/
+.next/
+out/
+.vercel/
+
+# Coverage & reports
+coverage/
+.nyc_output/
+test-report/
+jest-html-reporters-*
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS & editor specific
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+.idea/
+.vscode/
+*.swp
+
+# Environment variables
+.env
+.env.*
+!.env.example
+.env*.local
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# SSL & certs
+*.pem
+*.crt
+*.key
+
+# Misc
+*.log
+*.tgz
+*.bak
+*.tmp
+*.temp
+*.orig
+
+# Firebase & Supabase (if applicable)
+.supabase/
+.firebase/
+
+# Optional: Ignore uploads or user-generated data
+public/uploads/
+public/temp/
