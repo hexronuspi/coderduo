@@ -38,7 +38,13 @@ export async function chatWithMistral(
       hasQuestionContext: !!questionContext
     });
     
-    const response = await fetch('/api/chat/mistral', {
+    // Log the API URL and deployment environment for debugging
+    const apiUrl = '/api/chat/mistral';
+    console.log(`Making API request to: ${apiUrl}`);
+    console.log(`Current environment: ${process.env.NODE_ENV || 'unknown'}`);
+    console.log(`Is Vercel: ${typeof window !== 'undefined' && window.location.hostname.includes('vercel.app') ? 'Yes' : 'No'}`);
+    
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -47,6 +53,11 @@ export async function chatWithMistral(
     });
     
     console.log(`Mistral API response status: ${response.status}`);
+    
+    // Additional logging for authentication errors
+    if (response.status === 401) {
+      console.error('Authentication error detected. This likely means your Mistral API keys are not properly configured in the Vercel environment variables.');
+    }
     
     if (!response.ok) {
       let errorData;
@@ -90,6 +101,76 @@ export async function chatWithMistral(
   } catch (error) {
     console.error('Error calling Mistral API:', error);
     throw error;
+  }
+}
+
+// Function to check API health and environment configuration
+export async function checkMistralApiConnection(): Promise<{
+  isConnected: boolean;
+  message: string;
+  environment?: string;
+  isVercel?: boolean;
+}> {
+  try {
+    console.log('Checking Mistral API connection...');
+    
+    // Simple health check request
+    const response = await fetch('/api/chat/mistral', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: 'user',
+            content: 'API connection test'
+          }
+        ],
+        model: 'mistral-small'
+      }),
+    });
+    
+    if (!response.ok) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        errorData = { error: response.statusText };
+      }
+      
+      // Check for specific error types
+      if (response.status === 401) {
+        return {
+          isConnected: false,
+          message: 'Authentication error: Mistral API keys are not configured correctly',
+          environment: process.env.NODE_ENV || 'unknown',
+          isVercel: typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
+        };
+      }
+      
+      return {
+        isConnected: false,
+        message: errorData?.error || `API error: ${response.status} ${response.statusText}`,
+        environment: process.env.NODE_ENV || 'unknown',
+        isVercel: typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
+      };
+    }
+    
+    // Successfully connected
+    return {
+      isConnected: true,
+      message: 'Successfully connected to Mistral API',
+      environment: process.env.NODE_ENV || 'unknown',
+      isVercel: typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
+    };
+  } catch (error) {
+    return {
+      isConnected: false,
+      message: error instanceof Error ? error.message : 'Unknown connection error',
+      environment: process.env.NODE_ENV || 'unknown',
+      isVercel: typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
+    };
   }
 }
 
@@ -202,24 +283,33 @@ export function useMistralChat(questionTitle: string) {
       // Replace the {query} placeholder with the actual user message
       apiMessages[0].content = apiMessages[0].content.replace('{query}', userMessage);
       
-      // Implement retry logic for rate limit errors
+      // Implement retry logic with model fallback
       let retries = 0;
-      const maxRetries = 2;
+      const maxRetries = 3; // Increased to allow for model fallbacks
       let lastError;
+      let currentModel = 'mistral-large-latest';
+      let modelFallbackAttempted = false;
       
       while (retries <= maxRetries) {
         try {
           // Add delay for retries with exponential backoff
           if (retries > 0) {
             const delayMs = Math.min(1000 * Math.pow(2, retries - 1), 5000); // 1s, 2s, 4s...
-            console.log(`Retrying request (attempt ${retries}/${maxRetries}) after ${delayMs}ms delay`);
+            console.log(`Retrying request (attempt ${retries}/${maxRetries}) after ${delayMs}ms delay using model: ${currentModel}`);
             await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
+          
+          // First try large model, fall back to small after first error
+          if (retries === 1 && !modelFallbackAttempted) {
+            currentModel = 'mistral-small';
+            modelFallbackAttempted = true;
+            console.log('Falling back to smaller model: mistral-small');
           }
           
           // Send the request to the API
           const response = await chatWithMistral(
             apiMessages, 
-            'mistral-small', // Changed to mistral-small which has lower requirements
+            currentModel,
             context, // Pass the question context
             (busyCount: number) => setBusyKeyCount(busyCount)
           );

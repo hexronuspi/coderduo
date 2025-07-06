@@ -31,16 +31,78 @@ interface ApiKey {
 const initApiKeys = (): ApiKey[] => {
   const keys: ApiKey[] = [];
   
-  // Debug log to show available environment variables (dev mode only)
-  if (process.env.NODE_ENV === 'development') {
-    console.log('Looking for Mistral API keys in environment variables:');
-    console.log('- MISTRAL:', process.env.MISTRAL ? `${process.env.MISTRAL.substring(0, 3)}...${process.env.MISTRAL.substring(process.env.MISTRAL.length - 3)} (${process.env.MISTRAL.length} chars)` : 'not set');
+  // Debug log to show available environment variables (in all environments for troubleshooting)
+  // This helps diagnose issues with API keys in production/Vercel environments
+  console.log(`Environment: ${process.env.NODE_ENV}, Vercel: ${!!process.env.VERCEL}`);
+  console.log('Looking for Mistral API keys in environment variables:');
+  console.log('- MISTRAL:', process.env.MISTRAL ? `${process.env.MISTRAL.substring(0, 3)}...${process.env.MISTRAL.substring(process.env.MISTRAL.length - 3)} (${process.env.MISTRAL.length} chars)` : 'not set');
+  for (let i = 1; i <= 9; i++) {
+    const envVarName = `MISTRAL${i}`;
+    const envKey = process.env[envVarName];
+    console.log(`- ${envVarName}:`, envKey ? `${envKey.substring(0, 3)}...${envKey.substring(envKey.length - 3)} (${envKey.length} chars)` : 'not set');
+  }
+  
+  // Log all environment variable names (without values) to help debug
+  console.log('All environment variables available:', Object.keys(process.env).join(', '));
+  
+  // Special handling for Vercel deployment
+  if (process.env.VERCEL === '1') {
+    console.log('Running in Vercel environment, checking for special Vercel environment variable patterns');
+    
+    // Vercel sometimes requires special handling for environment variables
+    // Let's check for common patterns and formats
+    
+    // Check for MISTRAL directly
+    const mainApiKey = process.env?.MISTRAL;
+    if (mainApiKey && mainApiKey.trim().length > 20) {
+      keys.push({
+        key: mainApiKey.trim(),
+        isAvailable: true,
+        lastUsed: 0,
+        errorCount: 0
+      });
+      console.log('Added main MISTRAL key from Vercel environment');
+    }
+    
+    // Check for MISTRAL1-9 format
     for (let i = 1; i <= 9; i++) {
-      const envVarName = `MISTRAL${i}`;
-      const envKey = process.env[envVarName];
-      console.log(`- ${envVarName}:`, envKey ? `${envKey.substring(0, 3)}...${envKey.substring(envKey.length - 3)} (${envKey.length} chars)` : 'not set');
+      const envKey = process.env[`MISTRAL${i}`];
+      if (envKey && envKey.trim().length > 20) {
+        keys.push({
+          key: envKey.trim(),
+          isAvailable: true,
+          lastUsed: 0,
+          errorCount: 0
+        });
+        console.log(`Added MISTRAL${i} key from Vercel environment`);
+      }
+    }
+    
+    // Alternative formats sometimes seen in Vercel
+    const altFormats = ['MISTRAL_API_KEY', 'MISTRAL_KEY', 'MISTRALAI_API_KEY', 'MISTRALAI_KEY'];
+    for (const format of altFormats) {
+      const altKey = process.env[format];
+      if (altKey && altKey.trim().length > 20) {
+        keys.push({
+          key: altKey.trim(),
+          isAvailable: true,
+          lastUsed: 0,
+          errorCount: 0
+        });
+        console.log(`Added key from alternative format: ${format}`);
+      }
+    }
+    
+    // If we found any keys in Vercel environment, return them now
+    if (keys.length > 0) {
+      console.log(`Found ${keys.length} valid keys in Vercel environment`);
+      return keys;
+    } else {
+      console.error('⚠️ No valid Mistral API keys found in Vercel environment!');
     }
   }
+  
+  // Standard environment variable handling (for non-Vercel or if Vercel special handling didn't find keys)
   // Try MISTRALN format (1-9)
   for (let i = 1; i <= 9; i++) {
     const envKey = process.env[`MISTRAL${i}`];
@@ -112,10 +174,20 @@ if (apiKeys.length > 0) {
     k.key.length < 20 || // Keys are usually long
     k.key === 'MISTRAL' || // Literal env var names
     k.key === 'MISTRAL1' ||
-    k.key === 'YOUR_API_KEY_HERE' || // Placeholder values
-    k.key === process.env.MISTRAL || // Env var name instead of value
-    k.key.trim() === '' // Empty string
+    k.key === 'YOUR_API_KEY_HERE' // Placeholder values
   );
+  
+  // For each suspicious key, log detailed information about what's wrong
+  suspiciousKeys.forEach(k => {
+    const issues = [];
+    if (k.key.length < 20) issues.push('Too short');
+    if (k.key === 'MISTRAL' || k.key === 'MISTRAL1') issues.push('Is literal env var name');
+    if (k.key === 'YOUR_API_KEY_HERE') issues.push('Is placeholder');
+    if (k.key === process.env.MISTRAL) issues.push('May be env var name');
+    if (k.key.trim() === '') issues.push('Empty string');
+    
+    console.warn(`⚠️ Suspicious key issue: ${k.key.substring(0, 3)}...${k.key.substring(k.key.length - 3)}, length: ${k.key.length}, issues: ${issues.join(', ')}`);
+  });
   
   if (suspiciousKeys.length > 0) {
     console.warn(`⚠️ WARNING: ${suspiciousKeys.length} API keys appear to be invalid or improperly configured.`);
@@ -622,22 +694,45 @@ export async function POST(request: NextRequest) {
             console.error(`Key length: ${apiKey.key.length}, first few chars: ${apiKey.key.substring(0, 10)}...`);
             console.error(`Error details:`, errorData);
             console.error(`Authorization header: Bearer ${apiKey.key.substring(0, 3)}...${apiKey.key.substring(apiKey.key.length - 3)}`);
+            
+            // Add extra info for debugging
+            console.error('Environment variables available:', Object.keys(process.env).filter(k => 
+              k.includes('MISTRAL') || k.includes('KEY') || k.includes('API')
+            ).join(', '));
+            
             markKeyUnavailable(apiKey, 'authentication_error', model);
             
-            // Return a specific error for authentication issues
-            return NextResponse.json(
-              { 
-                error: 'API authentication error. Please check your API keys.',
-                detail: 'The Mistral API key was rejected. Make sure you have added correct API keys to your environment variables.',
-                isAuthError: true,
-                keyInfo: {
-                  prefix: apiKey.key.substring(0, 3),
-                  suffix: apiKey.key.substring(apiKey.key.length - 3),
-                  length: apiKey.key.length
-                }
-              },
-              { status: 401 }
-            );
+            // Try to see if there are other keys available that haven't been tried yet
+            const remainingKeys = apiKeys.filter(k => k.isAvailable && k !== apiKey);
+            if (remainingKeys.length > 0) {
+              console.log(`Authentication error with current key, but ${remainingKeys.length} other keys available to try`);
+            }
+            
+            // If in development mode and we have available keys, we'll let the next request try a different key
+            // Otherwise, return the auth error
+            if (process.env.NODE_ENV !== 'development' || remainingKeys.length === 0) {
+              // Return a specific error for authentication issues
+              return NextResponse.json(
+                { 
+                  error: 'API authentication error. Please check your API keys.',
+                  detail: 'The Mistral API key was rejected. Make sure you have added correct API keys to your environment variables.',
+                  isAuthError: true,
+                  keyInfo: {
+                    prefix: apiKey.key.substring(0, 3),
+                    suffix: apiKey.key.substring(apiKey.key.length - 3),
+                    length: apiKey.key.length,
+                    hasWhitespace: /\s/.test(apiKey.key),
+                    remainingKeysCount: remainingKeys.length,
+                    environment: process.env.NODE_ENV || 'unknown',
+                    isVercel: !!process.env.VERCEL
+                  }
+                },
+                { status: 401 }
+              );
+            }
+            
+            // For dev mode with remaining keys, throw an error that will be caught and retried
+            throw new Error('Authentication error - will try another key if available');
           }
           
           // Handle rate limiting or quota exceeded
