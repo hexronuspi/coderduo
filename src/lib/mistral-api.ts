@@ -136,6 +136,7 @@ export async function checkMistralApiConnection(): Promise<{
       try {
         errorData = await response.json();
       } catch (e) {
+        console.log(e)
         errorData = { error: response.statusText };
       }
       
