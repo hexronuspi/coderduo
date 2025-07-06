@@ -29,25 +29,23 @@ interface ApiKey {
 const initApiKeys = (): ApiKey[] => {
   const keys: ApiKey[] = [];
   
-  // Try to load from MISTRAL_API_KEY_N format
-  for (let i = 1; i <= 10; i++) {
-    const envKey = process.env[`MISTRAL${i}`];
-    if (envKey) {
-      keys.push({
-        key: envKey,
-        isAvailable: true,
-        lastUsed: 0,
-        errorCount: 0
-      });
+  // Debug log to show available environment variables (dev mode only)
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Looking for Mistral API keys in environment variables:');
+    console.log('- MISTRAL:', process.env.MISTRAL ? `${process.env.MISTRAL.substring(0, 3)}...${process.env.MISTRAL.substring(process.env.MISTRAL.length - 3)} (${process.env.MISTRAL.length} chars)` : 'not set');
+    for (let i = 1; i <= 9; i++) {
+      const envVarName = `MISTRAL${i}`;
+      const envKey = process.env[envVarName];
+      console.log(`- ${envVarName}:`, envKey ? `${envKey.substring(0, 3)}...${envKey.substring(envKey.length - 3)} (${envKey.length} chars)` : 'not set');
     }
   }
-
-  // Also try MISTRALN format
-  for (let i = 1; i <= 10; i++) {
+  // Try MISTRALN format (1-9)
+  for (let i = 1; i <= 9; i++) {
     const envKey = process.env[`MISTRAL${i}`];
     if (envKey) {
+      // Trim key to avoid whitespace issues
       keys.push({
-        key: envKey,
+        key: envKey.trim(),
         isAvailable: true,
         lastUsed: 0,
         errorCount: 0
@@ -56,10 +54,11 @@ const initApiKeys = (): ApiKey[] => {
   }
   
   // Check the main API key
-  const mainApiKey = process.env.MISTRAL;
+  const mainApiKey = process.env?.MISTRAL;
   if (mainApiKey) {
+    // Trim key to avoid whitespace issues
     keys.push({
-      key: mainApiKey,
+      key: mainApiKey.trim(),
       isAvailable: true,
       lastUsed: 0,
       errorCount: 0
@@ -69,9 +68,10 @@ const initApiKeys = (): ApiKey[] => {
   // If no keys found, add dummy keys for development
   if (keys.length === 0 && process.env.NODE_ENV === 'development') {
     console.log('No Mistral API keys found in environment variables. Using dummy keys for development.');
+    console.log('IMPORTANT: These dummy keys will only work for mock responses.');
     for (let i = 1; i <= 3; i++) {
       keys.push({
-        key: `MISTRAL${i}`,
+        key: `DUMMY_MISTRAL_KEY_${i}`,
         isAvailable: true,
         lastUsed: 0,
         errorCount: 0
@@ -79,7 +79,7 @@ const initApiKeys = (): ApiKey[] => {
     }
   } else if (keys.length === 0 && process.env.NODE_ENV === 'production') {
     console.error('⚠️ PRODUCTION WARNING: No Mistral API keys found in environment variables.');
-    console.error('Please set MISTRAL_API_KEY, MISTRAL_API_KEY_1, or MISTRAL1 environment variables.');
+    console.error('Please set MISTRAL or MISTRAL1 through MISTRAL9 environment variables.');
   }
   
   return keys;
@@ -100,16 +100,19 @@ console.log(`Initialized ${apiKeys.length} Mistral API keys`);
 if (apiKeys.length > 0) {
   console.log('API keys available:', apiKeys.map(k => ({ 
     prefix: k.key.substring(0, 3) + '...' + k.key.substring(k.key.length - 3),
-    isAvailable: k.isAvailable
+    isAvailable: k.isAvailable,
+    length: k.key.length,
+    isDummy: k.key.startsWith('DUMMY_MISTRAL_KEY_')
   })));
   
   // Validate API keys - log warnings for potential issues
   const suspiciousKeys = apiKeys.filter(k => 
     k.key.length < 20 || // Keys are usually long
-    k.key === 'MISTRAL_API_KEY' || // Literal env var names
+    k.key === 'MISTRAL' || // Literal env var names
     k.key === 'MISTRAL1' ||
     k.key === 'YOUR_API_KEY_HERE' || // Placeholder values
-    k.key === process.env.MISTRAL // Env var name instead of value
+    k.key === process.env.MISTRAL || // Env var name instead of value
+    k.key.trim() === '' // Empty string
   );
   
   if (suspiciousKeys.length > 0) {
@@ -177,8 +180,8 @@ const getAvailableApiKey = (): ApiKey | null => {
   }
   
   // If we're in development mode and have dummy keys, just return the first available one
-  if (process.env.NODE_ENV === 'development' && availableKeys.some(k => k.key.startsWith('MISTRAL'))) {
-    const dummyKeys = availableKeys.filter(k => k.key.startsWith('MISTRAL'));
+  if (process.env.NODE_ENV === 'development' && availableKeys.some(k => k.key.startsWith('DUMMY_MISTRAL_KEY_'))) {
+    const dummyKeys = availableKeys.filter(k => k.key.startsWith('DUMMY_MISTRAL_KEY_'));
     return dummyKeys[0];
   }
   
@@ -212,7 +215,7 @@ const getAvailableApiKey = (): ApiKey | null => {
 // Mark an API key as unavailable with reason tracking
 const markKeyUnavailable = (key: ApiKey, reason: string = 'unknown') => {
   // In development mode with dummy keys, don't mark as unavailable for too long
-  const isDummyKey = key.key.startsWith('MISTRAL');
+  const isDummyKey = key.key.startsWith('DUMMY_MISTRAL_KEY_');
   
   if (process.env.NODE_ENV === 'development' && isDummyKey) {
     // For dummy keys in dev, just update the lastUsed time but keep them available
@@ -459,7 +462,7 @@ export async function POST(request: NextRequest) {
     const model = body.model || 'mistral-large-latest';
     
     // For development mode, provide a mock response if we're using dummy keys
-    if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('MISTRAL')) {
+    if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
       console.log('Using mock response for development');
       const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
       
@@ -493,7 +496,19 @@ export async function POST(request: NextRequest) {
         // Log masking the key for security
         const keyPrefix = apiKey.key.substring(0, 3);
         const keySuffix = apiKey.key.substring(apiKey.key.length - 3);
-        console.log(`Making Mistral API request with key ${keyPrefix}...${keySuffix}`);
+        console.log(`Making Mistral API request with key ${keyPrefix}...${keySuffix} (length: ${apiKey.key.length})`);
+        
+        // Debug log to help diagnose issues
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Debug info for API key:', {
+            length: apiKey.key.length,
+            firstChar: apiKey.key.charAt(0),
+            lastChar: apiKey.key.charAt(apiKey.key.length - 1),
+            hasWhitespace: /\s/.test(apiKey.key),
+            prefix: keyPrefix,
+            suffix: keySuffix
+          });
+        }
         
         const requestBody = {
           model,
@@ -542,14 +557,22 @@ export async function POST(request: NextRequest) {
           // Handle authentication errors
           if (response.status === 401) {
             console.error(`Authentication error with Mistral API: Key ${apiKey.key.substring(0, 3)}...${apiKey.key.substring(apiKey.key.length - 3)} is invalid or expired`);
+            console.error(`Key length: ${apiKey.key.length}, first few chars: ${apiKey.key.substring(0, 10)}...`);
+            console.error(`Error details:`, errorData);
+            console.error(`Authorization header: Bearer ${apiKey.key.substring(0, 3)}...${apiKey.key.substring(apiKey.key.length - 3)}`);
             markKeyUnavailable(apiKey, 'authentication_error');
             
             // Return a specific error for authentication issues
             return NextResponse.json(
               { 
                 error: 'API authentication error. Please check your API keys.',
-                detail: 'The Mistral API key was rejected. This requires administrator attention.',
-                isAuthError: true
+                detail: 'The Mistral API key was rejected. Make sure you have added correct API keys to your environment variables.',
+                isAuthError: true,
+                keyInfo: {
+                  prefix: apiKey.key.substring(0, 3),
+                  suffix: apiKey.key.substring(apiKey.key.length - 3),
+                  length: apiKey.key.length
+                }
               },
               { status: 401 }
             );
@@ -561,7 +584,7 @@ export async function POST(request: NextRequest) {
             markKeyUnavailable(apiKey, reason);
             
             // If in development and we have "dummy keys", just return a mock response instead of an error
-            if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('MISTRAL')) {
+            if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
               console.log('Rate limit hit, but in development mode - providing mock response');
               const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
               
@@ -649,7 +672,7 @@ export async function POST(request: NextRequest) {
         
         // In development mode with dummy keys, introduce a small delay between usages
         // This helps simulate real API behavior and avoid marking keys as busy too quickly
-        if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('MISTRAL')) {
+        if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
           const staggeredDelay = Math.random() * 2000; // Random delay up to 2 seconds
           console.log(`Adding artificial delay of ${Math.round(staggeredDelay)}ms for development mode`);
           await new Promise(resolve => setTimeout(resolve, staggeredDelay));
@@ -668,7 +691,7 @@ export async function POST(request: NextRequest) {
         markKeyUnavailable(apiKey, `connection_error: ${errorMessage.substring(0, 50)}`);
         
         // If in development with dummy keys, return a mock response instead of an error
-        if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('MISTRAL')) {
+        if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
           console.log('Connection error, but in development mode - providing mock response');
           const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
           
