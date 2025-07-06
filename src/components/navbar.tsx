@@ -1,11 +1,11 @@
 "use client";
 
 import { cn } from "@/utils/cn";
-import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Avatar, Badge } from "@nextui-org/react";
+import { Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem } from "@nextui-org/react";
 import { useRouter } from "next/navigation";
 import { Link as ScrollLink } from "react-scroll";
 import { useState, useEffect } from "react";
-import { Menu, User, Star, Code, LogIn } from "lucide-react";
+import { Menu, LogIn } from "lucide-react";
 
 export function Navbar() {
   const router = useRouter();

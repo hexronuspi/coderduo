@@ -1,0 +1,4 @@
+{
+  "questionChat": "Given the Problem: {title}\n{question}, the hint as {hint} and the solution as {solution}, answer the user's query: {query}. Provide a step-by-step explanation that guides the user toward understanding without giving the complete solution immediately. Focus on explaining concepts and providing hints rather than directly solving the problem for them.",
+  "questionChatWithHistory": "Given the Problem: {title}\n{question}, the hint as {hint} and the solution as {solution}, answer the user's query: {query}. Based on the conversation history below, continue providing guidance without revealing the full solution immediately unless explicitly requested.\n\nConversation History:\n{history}"
+}

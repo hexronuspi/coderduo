@@ -1,12 +1,10 @@
 "use client";
 
 import { Button, Card, CardBody, CardFooter, CardHeader, Chip, Divider, ButtonGroup, Tooltip } from "@nextui-org/react";
-import { useRouter } from "next/navigation";
-import { Code, Lightbulb, Shuffle, Brain, MessageCircle, ChevronRight, Lock, CheckCircle2, Copy } from "lucide-react";
+import {  Lightbulb, Shuffle, Brain, MessageCircle, ChevronRight,  CheckCircle2, Copy } from "lucide-react";
 import { useState } from "react";
 
 export function Hero() {
-  const router = useRouter();
   const [showHint, setShowHint] = useState(false);
   const [showSolution, setShowSolution] = useState(false);
   const [showChat, setShowChat] = useState(false);
@@ -108,7 +106,7 @@ export function Hero() {
                       </h4>
                       <div className="space-y-3">
                         <div className="bg-white p-3 rounded-lg shadow-sm">
-                          <p className="text-sm text-gray-700">1. Try using a hash map to keep track of values you've already seen.</p>
+                          <p className="text-sm text-gray-700">1. Try using a hash map to keep track of values you&apos;ve already seen.</p>
                         </div>
                         <div className="bg-white p-3 rounded-lg shadow-sm">
                           <p className="text-sm text-gray-700">2. For each number, check if its complement (target - current) exists in the hash map.</p>

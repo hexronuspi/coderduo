@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Button, Card, CardBody, CardFooter, CardHeader, Chip, Divider } from "@nextui-org/react";
-import { Check, Zap, ArrowRight, Package } from "lucide-react";
-import { fetchPlans, fetchCreditPacks, fetchFreePlan } from "@/lib/subscription";
+import { Card, CardBody, CardHeader, Chip, Divider } from "@nextui-org/react";
+import { Check, Zap, Package } from "lucide-react";
+import { fetchPlans } from "@/lib/subscription";
 import { Plan } from "@/types/subscription";
 
 export function Pricing() {
-  const [plans, setPlans] = useState<Plan[]>([]);
+  const [, setPlans] = useState<Plan[]>([]);
   const [freePlan, setFreePlan] = useState<Plan | null>(null);
   const [creditPacks, setCreditPacks] = useState<Plan[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -114,20 +114,11 @@ export function Pricing() {
                     ))}
                   </ul>
                 </CardBody>
-                <CardFooter className="pt-0">
-                  <Button 
-                    className="w-full bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium py-6"
-                    variant="flat"
-                    size="lg"
-                  >
-                    Get Started Free
-                  </Button>
-                </CardFooter>
               </Card>
             )}
 
             {/* Credit Pack Cards */}
-            {creditPacks.map((pack, index) => {
+            {creditPacks.map((pack) => {
               const isBestValue = bestValuePack?.id === pack.id;
               const pricePerCredit = Math.round((pack.price / pack.credits) * 100) / 100;
               

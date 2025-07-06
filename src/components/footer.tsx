@@ -1,12 +1,10 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { Button } from "@nextui-org/react";
 import { Code, Github, Linkedin, Twitter, ArrowUp } from "lucide-react";
 import { Link as ScrollLink } from "react-scroll";
 
 export function Footer() {
-  const router = useRouter();
   const currentYear = new Date().getFullYear();
 
   return (

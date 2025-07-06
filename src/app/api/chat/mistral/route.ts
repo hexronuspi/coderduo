@@ -1,0 +1,669 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createSupabaseRouteHandlerClient } from '@/lib/supabase/server';
+
+// Define the expected structure of the request body
+interface ChatRequestBody {
+  messages: Array<{
+    role: string;
+    content: string;
+  }>;
+  model?: string;
+}
+
+// Define API key interface
+interface ApiKey {
+  key: string;
+  isAvailable: boolean;
+  lastUsed: number;
+  errorCount: number;
+}
+
+// Initialize API keys from environment variables
+const initApiKeys = (): ApiKey[] => {
+  const keys: ApiKey[] = [];
+  
+  // Try to load from MISTRAL_API_KEY_N format
+  for (let i = 1; i <= 10; i++) {
+    const envKey = process.env[`MISTRAL_API_KEY_${i}`];
+    if (envKey) {
+      keys.push({
+        key: envKey,
+        isAvailable: true,
+        lastUsed: 0,
+        errorCount: 0
+      });
+    }
+  }
+
+  // Also try MISTRALN format
+  for (let i = 1; i <= 10; i++) {
+    const envKey = process.env[`MISTRAL${i}`];
+    if (envKey) {
+      keys.push({
+        key: envKey,
+        isAvailable: true,
+        lastUsed: 0,
+        errorCount: 0
+      });
+    }
+  }
+  
+  // Check the main API key
+  const mainApiKey = process.env.MISTRAL_API_KEY;
+  if (mainApiKey) {
+    keys.push({
+      key: mainApiKey,
+      isAvailable: true,
+      lastUsed: 0,
+      errorCount: 0
+    });
+  }
+  
+  // If no keys found, add dummy keys for development
+  if (keys.length === 0 && process.env.NODE_ENV === 'development') {
+    console.log('No Mistral API keys found in environment variables. Using dummy keys for development.');
+    for (let i = 1; i <= 3; i++) {
+      keys.push({
+        key: `MISTRAL${i}`,
+        isAvailable: true,
+        lastUsed: 0,
+        errorCount: 0
+      });
+    }
+  } else if (keys.length === 0 && process.env.NODE_ENV === 'production') {
+    console.error('⚠️ PRODUCTION WARNING: No Mistral API keys found in environment variables.');
+    console.error('Please set MISTRAL_API_KEY, MISTRAL_API_KEY_1, or MISTRAL1 environment variables.');
+  }
+  
+  return keys;
+};
+
+// API keys with their availability status
+const apiKeys: ApiKey[] = initApiKeys();
+
+// Stagger the lastUsed timestamps to ensure we don't hit them all at once
+// This helps with better initial distribution
+apiKeys.forEach((key, index) => {
+  // Stagger the keys by 5 seconds each
+  key.lastUsed = Date.now() - (index * 5000);
+});
+
+// Log API key info without revealing the full keys
+console.log(`Initialized ${apiKeys.length} Mistral API keys`);
+if (apiKeys.length > 0) {
+  console.log('API keys available:', apiKeys.map(k => ({ 
+    prefix: k.key.substring(0, 3) + '...' + k.key.substring(k.key.length - 3),
+    isAvailable: k.isAvailable
+  })));
+} else {
+  console.log('No API keys available!');
+}
+
+// Reset API keys that have been marked unavailable after a certain period
+// with exponential backoff based on error count
+const resetUnavailableKeys = () => {
+  const now = Date.now();
+  
+  // Dynamically adjust reset time based on server load
+  // Higher error counts mean longer cooldown periods
+  const getResetTimeForKey = (errorCount: number) => {
+    // Base reset time: 10s in dev, 30s in production
+    const baseResetTime = process.env.NODE_ENV === 'development' ? 10000 : 30000;
+    
+    // Apply exponential backoff based on error count, with max of 5 minutes
+    // 0 errors: baseResetTime
+    // 1 error: 1.5x baseResetTime
+    // 2 errors: 2.5x baseResetTime
+    // 3+ errors: 4x baseResetTime
+    const multiplier = errorCount === 0 ? 1 :
+                      errorCount === 1 ? 1.5 :
+                      errorCount === 2 ? 2.5 : 4;
+                      
+    return Math.min(baseResetTime * multiplier, 300000); // Cap at 5 minutes
+  };
+  
+  let resetCount = 0;
+  apiKeys.forEach(key => {
+    const resetTimeForThisKey = getResetTimeForKey(key.errorCount);
+    
+    // If the key is unavailable and the cooldown period has passed
+    if (!key.isAvailable && (now - key.lastUsed > resetTimeForThisKey)) {
+      key.isAvailable = true;
+      // Reduce error count rather than resetting completely
+      key.errorCount = Math.max(0, key.errorCount - 1);
+      resetCount++;
+      
+      console.log(`Reset key with error count ${key.errorCount} after ${Math.round(resetTimeForThisKey/1000)}s cooldown`);
+    }
+  });
+  
+  if (resetCount > 0) {
+    console.log(`Reset ${resetCount} API keys to available status (${apiKeys.filter(k => k.isAvailable).length}/${apiKeys.length} now available)`);
+  }
+};
+
+// Get the next available API key with improved distribution
+const getAvailableApiKey = (): ApiKey | null => {
+  // Always reset any keys that should be available again
+  resetUnavailableKeys();
+  
+  // Get all available keys
+  const availableKeys = apiKeys.filter(key => key.isAvailable);
+  
+  // If we have no available keys, return null
+  if (availableKeys.length === 0) {
+    return null;
+  }
+  
+  // If we're in development mode and have dummy keys, just return the first available one
+  if (process.env.NODE_ENV === 'development' && availableKeys.some(k => k.key.startsWith('MISTRAL'))) {
+    const dummyKeys = availableKeys.filter(k => k.key.startsWith('MISTRAL'));
+    return dummyKeys[0];
+  }
+  
+  // For real API keys, use a smarter selection algorithm:
+  
+  // First, prioritize keys with no errors
+  const noErrorKeys = availableKeys.filter(key => key.errorCount === 0);
+  if (noErrorKeys.length > 0) {
+    // From the no-error keys, select the least recently used one
+    return noErrorKeys.sort((a, b) => a.lastUsed - b.lastUsed)[0];
+  }
+  
+  // If all keys have errors, use a weighted random selection that favors keys with:
+  // - Lower error counts
+  // - Used longer ago
+  
+  // Calculate a score for each key (lower is better)
+  const keyScores = availableKeys.map(key => {
+    const errorScore = key.errorCount * 10; // Higher weight for errors
+    const timeScore = (Date.now() - key.lastUsed) / -10000; // Negative because lower times are worse
+    return { key, score: errorScore + timeScore };
+  });
+  
+  // Sort by score (lower is better)
+  keyScores.sort((a, b) => a.score - b.score);
+  
+  // Return the best key
+  return keyScores[0].key;
+};
+
+// Mark an API key as unavailable with reason tracking
+const markKeyUnavailable = (key: ApiKey, reason: string = 'unknown') => {
+  // In development mode with dummy keys, don't mark as unavailable for too long
+  const isDummyKey = key.key.startsWith('MISTRAL');
+  
+  if (process.env.NODE_ENV === 'development' && isDummyKey) {
+    // For dummy keys in dev, just update the lastUsed time but keep them available
+    // This ensures we can keep using the mock responses
+    key.lastUsed = Date.now();
+    
+    // Only increment error count if it's not a dummy key or if we really need to
+    if (reason === 'rate_limit' || reason === 'quota_exceeded') {
+      key.errorCount += 1;
+    }
+    
+    console.log(`Development mode: Keeping dummy key available despite ${reason} error`);
+    return;
+  }
+  
+  // For real keys or production environment
+  key.isAvailable = false;
+  key.lastUsed = Date.now();
+  key.errorCount += 1;
+  
+  console.log(`Marked API key ${key.key.substring(0, 3)}...${key.key.substring(key.key.length - 3)} as unavailable due to: ${reason}`);
+};
+
+// Update API key status when rate limited
+// const markKeyAsRateLimited = (key: ApiKey) => {
+//   key.isAvailable = false;
+//   key.lastUsed = Date.now();
+//   key.errorCount++;
+  
+//   console.log(`API key marked as rate limited (error count: ${key.errorCount})`);
+  
+//   // If a key has had multiple consecutive rate limit errors,
+//   // keep it unavailable for longer by not resetting it immediately
+//   if (key.errorCount >= 3) {
+//     console.log(`API key with high error count (${key.errorCount}) will be unavailable for an extended period`);
+//   }
+// };
+
+// Handle API response with rate limit detection
+// const handleMistralResponse = async (response: Response, apiKey: ApiKey) => {
+//   // Rate limit detection - mark key as unavailable on 429 or 500 errors
+//   if (response.status === 429 || (response.status >= 500 && response.status < 600)) {
+//     markKeyAsRateLimited(apiKey);
+    
+//     let errorMessage = `Rate limit reached (${response.status})`;
+//     try {
+//       const errorData = await response.json();
+//       if (errorData?.error) {
+//         errorMessage = errorData.error;
+//       }
+//     } catch (e) {
+//       // Ignore JSON parsing error for error response
+//     }
+    
+//     return {
+//       ok: false,
+//       status: response.status,
+//       error: errorMessage,
+//       busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
+//       totalKeyCount: apiKeys.length
+//     };
+//   }
+  
+//   // Regular error
+//   if (!response.ok) {
+//     // Mark key as unavailable but don't increment error count as much
+//     // since it's not a rate limit error
+//     apiKey.isAvailable = false;
+//     apiKey.lastUsed = Date.now();
+//     apiKey.errorCount = Math.min(apiKey.errorCount + 0.5, apiKey.errorCount + 1);
+    
+//     let errorMessage = `API error (${response.status})`;
+//     try {
+//       const errorData = await response.json();
+//       if (errorData?.error) {
+//         errorMessage = errorData.error;
+//       }
+//     } catch (e) {
+//       // Ignore JSON parsing error for error response
+//     }
+    
+//     return {
+//       ok: false,
+//       status: response.status,
+//       error: errorMessage,
+//       busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
+//       totalKeyCount: apiKeys.length
+//     };
+//   }
+  
+//   // Success - reset error count gradually
+//   if (apiKey.errorCount > 0) {
+//     apiKey.errorCount = Math.max(0, apiKey.errorCount - 0.5);
+//   }
+  
+//   // Parse response
+//   try {
+//     const data = await response.json();
+//     return {
+//       ok: true,
+//       data: data,
+//       busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
+//       totalKeyCount: apiKeys.length
+//     };
+//   } catch (error) {
+//     apiKey.isAvailable = false;
+//     apiKey.lastUsed = Date.now();
+//     apiKey.errorCount++;
+    
+//     return {
+//       ok: false,
+//       status: 500,
+//       error: 'Failed to parse API response',
+//       busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
+//       totalKeyCount: apiKeys.length
+//     };
+//   }
+// };
+
+export async function POST(request: NextRequest) {
+  try {
+    console.log('Starting Mistral API route handler');
+    
+    // Create server supabase client to verify authentication
+    const supabase = createSupabaseRouteHandlerClient();
+    
+    try {
+      // In development mode, skip the authentication check entirely
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Development mode: Skipping authentication check');
+      } else {
+        // Only verify authentication in production
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!session) {
+          return NextResponse.json(
+            { error: 'Unauthorized: Please log in to use this feature' },
+            { status: 401 }
+          );
+        }
+        console.log('Production mode: User authenticated successfully');
+      }
+    } catch (authError) {
+      console.error('Authentication error:', authError);
+      // In development mode, continue even if authentication fails
+      if (process.env.NODE_ENV !== 'development') {
+        return NextResponse.json(
+          { error: 'Authentication error', details: authError instanceof Error ? authError.message : String(authError) },
+          { status: 500 }
+        );
+      } else {
+        console.log('Continuing in development mode despite authentication error');
+      }
+    }
+    
+    // Parse the request body
+    let body: ChatRequestBody;
+    try {
+      body = await request.json() as ChatRequestBody;
+      console.log('Request body parsed successfully');
+    } catch (parseError) {
+      console.error('Error parsing request body:', parseError);
+      return NextResponse.json(
+        { error: 'Invalid JSON in request body', details: parseError instanceof Error ? parseError.message : String(parseError) },
+        { status: 400 }
+      );
+    }
+    
+    if (!body?.messages || !Array.isArray(body.messages)) {
+      console.error('Invalid request format:', body);
+      return NextResponse.json(
+        { error: 'Invalid request: messages array is required' },
+        { status: 400 }
+      );
+    }
+    
+    // Get an available API key
+    const apiKey = getAvailableApiKey();
+    
+    if (!apiKey) {
+      // If in development mode, create a temporary dummy key for this request
+      if (process.env.NODE_ENV === 'development') {
+        console.log('No available API keys, but in development mode - creating a temporary dummy key');
+        
+        const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
+        
+        return NextResponse.json({
+          id: 'mock-response-id',
+          object: 'chat.completion',
+          created: Date.now(),
+          model: body.model || 'mistral-large-latest',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: `This is a mock response (no keys available). You asked: "${userMessage}"\n\nI'm a simulated Mistral AI model. In production, you would need available API keys.`
+              },
+              finish_reason: 'stop'
+            }
+          ],
+          usage: {
+            prompt_tokens: userMessage.length,
+            completion_tokens: 100,
+            total_tokens: userMessage.length + 100
+          },
+          busyKeyCount: apiKeys.length,
+          totalKeyCount: apiKeys.length
+        });
+      }
+      
+      // In production, return a more detailed error with retry information
+      return NextResponse.json(
+        { 
+          error: 'API rate limit reached. Please try again later.',
+          message: 'All API keys are currently busy. This typically resolves in 30-60 seconds.',
+          busyKeyCount: apiKeys.length,
+          totalKeyCount: apiKeys.length,
+          retryAfter: 30, // Suggest retry after 30 seconds
+          isRateLimitError: true
+        },
+        { 
+          status: 503,
+          headers: {
+            'Retry-After': '30'
+          }
+        }
+      );
+    }
+    
+    // Configure the model
+    const model = body.model || 'mistral-large-latest';
+    
+    // For development mode, provide a mock response if we're using dummy keys
+    if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('MISTRAL')) {
+      console.log('Using mock response for development');
+      const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
+      
+      return NextResponse.json({
+        id: 'mock-response-id',
+        object: 'chat.completion',
+        created: Date.now(),
+        model: model,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: `This is a mock response for development. You asked: "${userMessage}"\n\nI'm a simulated Mistral AI model. In production, this would be an actual response from the Mistral API.`
+            },
+            finish_reason: 'stop'
+          }
+        ],
+        usage: {
+          prompt_tokens: userMessage.length,
+          completion_tokens: 100,
+          total_tokens: userMessage.length + 100
+        },
+        busyKeyCount: 0,
+        totalKeyCount: apiKeys.length
+      });
+    }
+    
+    // Make the request to Mistral API
+      try {
+        // Log masking the key for security
+        const keyPrefix = apiKey.key.substring(0, 3);
+        const keySuffix = apiKey.key.substring(apiKey.key.length - 3);
+        console.log(`Making Mistral API request with key ${keyPrefix}...${keySuffix}`);
+        
+        const requestBody = {
+          model,
+          messages: body.messages,
+          temperature: 0.7,
+          top_p: 0.9,
+          max_tokens: 1000,
+        };
+        
+        // Log sanitized request (removing full message content for brevity)
+        const sanitizedMessages = requestBody.messages.map(m => ({
+          role: m.role,
+          contentLength: m.content.length,
+          contentPreview: m.content.substring(0, 50) + (m.content.length > 50 ? '...' : '')
+        }));
+        console.log('Request metadata:', {
+          model: requestBody.model,
+          messageCount: requestBody.messages.length,
+          messages: sanitizedMessages
+        });
+        
+        // Make the API call
+        const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey.key}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+        
+        console.log(`Mistral API response status: ${response.status}`);
+        
+        // Handle error responses
+        if (!response.ok) {
+          let errorData: unknown;
+          try {
+            errorData = await response.json();
+            console.error(`Mistral API error: ${response.status}`, errorData);
+            } catch (jsonError) {
+            console.error(`Mistral API error: ${response.status} (failed to parse error JSON)`, jsonError);
+            console.error(`Failed to parse Mistral API error response: ${response.statusText}`);
+            errorData = { error: { message: response.statusText } };
+          }
+          
+          // Handle rate limiting or quota exceeded
+          if (response.status === 429 || response.status === 403) {
+            const reason = response.status === 429 ? 'rate_limit' : 'quota_exceeded';
+            markKeyUnavailable(apiKey, reason);
+            
+            // If in development and we have "dummy keys", just return a mock response instead of an error
+            if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('MISTRAL')) {
+              console.log('Rate limit hit, but in development mode - providing mock response');
+              const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
+              
+              return NextResponse.json({
+                id: 'mock-response-id',
+                object: 'chat.completion',
+                created: Date.now(),
+                model: model,
+                choices: [
+                  {
+                    index: 0,
+                    message: {
+                      role: 'assistant',
+                      content: `This is a mock response (rate limit fallback). You asked: "${userMessage}"\n\nI'm a simulated Mistral AI model. In production, this would be an actual response from the Mistral API.`
+                    },
+                    finish_reason: 'stop'
+                  }
+                ],
+                usage: {
+                  prompt_tokens: userMessage.length,
+                  completion_tokens: 100,
+                  total_tokens: userMessage.length + 100
+                },
+                busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
+                totalKeyCount: apiKeys.length
+              });
+            }
+            
+            return NextResponse.json(
+              { 
+                error: 'API rate limit reached. Please try again later.',
+                busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
+                totalKeyCount: apiKeys.length
+              },
+              { status: 429 }
+            );
+          }
+          
+          return NextResponse.json(
+            { 
+              error: `Mistral API error: ${
+                typeof errorData === 'object' && errorData !== null && 'error' in errorData && typeof (errorData as { error?: { message?: string } }).error?.message === 'string'
+                  ? (errorData as { error?: { message?: string } }).error?.message
+                  : response.statusText
+              }` 
+            },
+            { status: response.status }
+          );  
+        }
+        
+        // Parse successful response
+        let data: {
+          id: string;
+          object: string;
+          created: number;
+          model: string;
+          choices: Array<{
+            index: number;
+            message: {
+              role: string;
+              content: string;
+            };
+            finish_reason: string;
+          }>;
+          usage: {
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+          };
+        };
+        try {
+          data = await response.json();
+          console.log('Mistral API response received successfully');
+        } catch (jsonError) {
+          console.error('Failed to parse Mistral API response:', jsonError);
+          return NextResponse.json(
+            { error: 'Invalid response from Mistral API' },
+            { status: 500 }
+          );
+        }
+        
+        // Update key usage metrics
+        apiKey.lastUsed = Date.now();
+        console.log(`Successfully used API key ${apiKey.key.substring(0, 3)}...${apiKey.key.substring(apiKey.key.length - 3)}`);
+        
+        // In development mode with dummy keys, introduce a small delay between usages
+        // This helps simulate real API behavior and avoid marking keys as busy too quickly
+        if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('MISTRAL')) {
+          const staggeredDelay = Math.random() * 2000; // Random delay up to 2 seconds
+          console.log(`Adding artificial delay of ${Math.round(staggeredDelay)}ms for development mode`);
+          await new Promise(resolve => setTimeout(resolve, staggeredDelay));
+        }
+        
+        // Return the successful response
+        return NextResponse.json({
+          ...data,
+          busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
+          totalKeyCount: apiKeys.length
+        });
+        
+      } catch (error) {
+        console.error(`Error with Mistral API key:`, error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        markKeyUnavailable(apiKey, `connection_error: ${errorMessage.substring(0, 50)}`);
+        
+        // If in development with dummy keys, return a mock response instead of an error
+        if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('MISTRAL')) {
+          console.log('Connection error, but in development mode - providing mock response');
+          const userMessage = body.messages.find(m => m.role === 'user')?.content || '';
+          
+          return NextResponse.json({
+            id: 'mock-response-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: model,
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: `This is a mock response (connection error fallback). You asked: "${userMessage}"\n\nI'm a simulated Mistral AI model. In production, this would be an actual response from the Mistral API.`
+                },
+                finish_reason: 'stop'
+              }
+            ],
+            usage: {
+              prompt_tokens: userMessage.length,
+              completion_tokens: 100,
+              total_tokens: userMessage.length + 100
+            },
+            busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
+            totalKeyCount: apiKeys.length
+          });
+        }
+        
+        return NextResponse.json(
+          { 
+            error: 'Failed to connect to Mistral API. Please try again later.',
+            busyKeyCount: apiKeys.filter(k => !k.isAvailable).length,
+            totalKeyCount: apiKeys.length,
+            details: errorMessage
+          },
+          { status: 500 }
+        );
+      }
+    
+  } catch (error) {
+    console.error('Unexpected error in Mistral API route:', error);
+    return NextResponse.json(
+      { error: 'An unexpected error occurred', details: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
+  }
+}

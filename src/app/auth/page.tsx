@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Card, CardBody, CardHeader, CardFooter, Button } from "@nextui-org/react";
+import { useState, useEffect, useMemo, Suspense } from "react";
+import { Card, CardBody, CardHeader, CardFooter } from "@nextui-org/react";
 import { ArrowLeft, MailWarning } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -9,7 +9,8 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Auth } from '@supabase/auth-ui-react';
 import { ThemeSupa } from '@supabase/auth-ui-shared';
 
-export default function AuthPage() {
+// AuthContent component uses searchParams and needs to be wrapped in Suspense
+function AuthContent() {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -120,7 +121,7 @@ export default function AuthPage() {
             )}
             
             <p className="text-xs text-center text-gray-500 mt-8">
-              By continuing, you agree to Coder Duo's Terms of Service and Privacy Policy.
+              By continuing, you agree to Coder Duo`&apos;s Terms of Service and Privacy Policy.
             </p>
           </CardBody>
           
@@ -132,5 +133,22 @@ export default function AuthPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+// Add this export default function that wraps AuthContent in Suspense
+export default function AuthPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-primary-50 to-white">
+        <Card className="shadow-xl border-none w-full max-w-md">
+          <CardBody className="flex flex-col items-center justify-center py-8 px-6">
+            <p className="text-gray-500">Loading authentication...</p>
+          </CardBody>
+        </Card>
+      </div>
+    }>
+      <AuthContent />
+    </Suspense>
   );
 }

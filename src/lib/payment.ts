@@ -1,9 +1,10 @@
 import { Plan } from "@/types/subscription";
+import { RazorpayOptions, RazorpaySuccessResponse } from "@/types/razorpay";
 
 // Function to load the Razorpay SDK dynamically
 export const loadRazorpayScript = (): Promise<boolean> => {
   return new Promise((resolve) => {
-    if ((window as any).Razorpay) {
+    if (window.Razorpay) {
       console.log("Razorpay already loaded");
       resolve(true);
       return;
@@ -34,8 +35,8 @@ interface PaymentOptions {
   pack: Plan;
   name: string;
   email: string;
-  onSuccess: (response: any) => void;
-  onError: (error: any) => void;
+  onSuccess: (response: { verificationData: { success: boolean; orderId: string; error?: string; }; pack: Plan } & RazorpaySuccessResponse) => void;
+  onError: (error: Error | unknown) => void;
 }
 
 // Function to initialize and open the Razorpay payment gateway
@@ -56,7 +57,7 @@ export const initiateRazorpayPayment = async ({
       throw new Error('Failed to load Razorpay SDK');
     }
     
-    if (!(window as any).Razorpay) {
+    if (!window.Razorpay) {
       console.error("Razorpay object not available even after script loaded");
       throw new Error('Razorpay initialization failed');
     }
@@ -94,8 +95,8 @@ export const initiateRazorpayPayment = async ({
     console.log("Order created successfully:", orderData.razorpayOrderId);
 
     // Configure Razorpay options
-    const options = {
-      key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+    const options: RazorpayOptions = {
+      key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
       amount: orderData.amount,
       currency: orderData.currency || "INR",
       name: 'Coder Duo',
@@ -119,7 +120,7 @@ export const initiateRazorpayPayment = async ({
           console.log('Payment modal closed without completing payment');
         },
       },
-      handler: async function(response: any) {
+      handler: async function(response: RazorpaySuccessResponse) {
         console.log("Payment successful, verifying...", response);
         try {
           // Verify the payment on the server
@@ -166,7 +167,11 @@ export const initiateRazorpayPayment = async ({
     });
     
     // Initialize Razorpay
-    const razorpay = new (window as any).Razorpay(options);
+    if (!window.Razorpay) {
+      throw new Error('Razorpay is not available. Please check if the script was loaded correctly.');
+    }
+    
+    const razorpay = new window.Razorpay(options);
     
     console.log("Opening Razorpay payment modal...");
     // Open the payment modal

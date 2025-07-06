@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { Input, Card, CardBody, Chip, Button } from "@nextui-org/react";
+import { Input, Card, CardBody, Chip } from "@nextui-org/react";
 import { Search, Filter, ArrowRight } from "lucide-react";
 import { useRouter } from 'next/navigation';
 import { TypedSupabaseClient } from '@/lib/supabase/client';

@@ -2,7 +2,6 @@ import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'crypto';
 
 // Use your actual Razorpay API keys
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_Y6gGTPKFwvRnJu';
@@ -86,7 +85,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       // If the table doesn't exist, we'll just continue
-      console.log('Note: payment_orders table may not exist yet, continuing with order creation');
+      console.log('Note: payment_orders table may not exist yet, continuing with order creation', err);
     }
 
     // Call Razorpay API to create an order
@@ -142,7 +141,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       // If the table doesn't exist, we'll just continue
-      console.log('Note: could not update payment_orders, continuing');
+      console.log('Note: could not update payment_orders, continuing', err);
     }
 
     // Log successful order creation

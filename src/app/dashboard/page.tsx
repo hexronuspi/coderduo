@@ -1,22 +1,20 @@
 "use client";
 import { 
-  Card, CardBody, CardHeader, Divider, Button, 
-  Avatar, Chip, Tab, Tabs, Modal, ModalContent, 
+  Card, CardBody, Button, 
+  Avatar, Chip, Modal, ModalContent, 
   ModalHeader, ModalBody, ModalFooter, Input, Dropdown, 
-  DropdownTrigger, DropdownMenu, DropdownItem, Badge,
-  Tooltip, Progress
+  DropdownTrigger, DropdownMenu, DropdownItem,
+  Tooltip
 } from "@nextui-org/react";
 import { 
-  LogOut, Code, List, Settings, BookOpen, Home,
-  BookOpen as BookIcon, GraduationCap, Menu, ChevronDown,
-  CreditCard, User, Star, Edit, Plus, CheckCircle2,
-  Zap, Package,
+  LogOut, Code, List, Home,
+  BookOpen as BookIcon, Menu, ChevronDown,
+  CreditCard, User, Plus,
   CreditCardIcon
 } from "lucide-react";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import QuestionBank from "@/components/question-bank/question-bank";
-import Link from "next/link";
 import { Plan } from "@/types/subscription";
 import { fetchCreditPacks } from "@/lib/subscription";
 import { useRouter } from "next/navigation";
@@ -39,7 +37,7 @@ const QuestionBankSection = ({ supabase }: QuestionBankSectionProps) => {
 export default function Dashboard() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [username, setUsername] = useState("coderduo");
+  const [, setUsername] = useState("coderduo");
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("home");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -48,18 +46,17 @@ export default function Dashboard() {
   const [isFreeUser, setIsFreeUser] = useState(true);
   const [credits, setCredits] = useState(0);
   const [displayName, setDisplayName] = useState("coderduo");
-  const [tempName, setTempName] = useState("coderduo");
   const [selectedCreditPackId, setSelectedCreditPackId] = useState<string | null>(null);
-  const [creditPacks, setCreditPacks] = useState<Plan[]>([]);
+  const [, setCreditPacks] = useState<Plan[]>([]);
   const [userId, setUserId] = useState<string>("");
   
   // Initialize the toast utilities
-  const { success, error, warning, info, ToastContainer } = useToast();
+  const { success, ToastContainer } = useToast();
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
   // Function to fetch user profile data from users table
-  const fetchUserProfile = async (userId: string) => {
+  const fetchUserProfile = useCallback(async (userId: string) => {
     try {
       // Get current user data to get email
       const { data: authData } = await supabase.auth.getUser();
@@ -81,7 +78,13 @@ export default function Dashboard() {
       }
       
       if (data) {
-        const userData = data as any;
+        type UserProfile = {
+          id: string;
+          name?: string;
+          credits?: number;
+          // add other fields as needed
+        };
+        const userData = data as UserProfile;
         setUsername(userData.name || "");
         // Check if user has credits - determines if they are still on free plan
         const userCredits = userData.credits || 0;
@@ -92,7 +95,7 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Failed to fetch user profile:", err);
     }
-  };
+  }, [supabase]);
   
   useEffect(() => {
     if (!supabase) return;
@@ -153,7 +156,7 @@ export default function Dashboard() {
     return () => {
       subscription?.unsubscribe();
     };
-  }, [router, supabase]);
+  }, [router, supabase, fetchUserProfile]);
 
   // Function to handle sign out
   const handleSignOut = async () => {
@@ -185,18 +188,18 @@ export default function Dashboard() {
   // Functions for credit modal
   const openCreditModal = () => {
     // Check if Razorpay is loaded
-    if (!(window as any).Razorpay) {
+    if (!(window as unknown as { Razorpay?: unknown }).Razorpay) {
       console.warn("Razorpay is not loaded, attempting to load it now...");
       const script = document.createElement('script');
       script.src = 'https://checkout.razorpay.com/v1/checkout.js';
       script.async = true;
       script.onload = () => {
-        console.log("Razorpay loaded successfully");
-        setIsCreditModalOpen(true);
+      console.log("Razorpay loaded successfully");
+      setIsCreditModalOpen(true);
       };
       script.onerror = () => {
-        console.error("Failed to load Razorpay");
-        alert("Payment system is not available. Please refresh the page and try again.");
+      console.error("Failed to load Razorpay");
+      alert("Payment system is not available. Please refresh the page and try again.");
       };
       document.body.appendChild(script);
     } else {
@@ -211,15 +214,15 @@ export default function Dashboard() {
   };
   
   // Function to buy credits with specific pack selection
-  const buyCredits = (packId?: string) => {
-    // Find the matching credit pack or use the default one
-    if (packId) {
-      setSelectedCreditPackId(packId);
-    }
+  // const buyCredits = (packId?: string) => {
+  //   // Find the matching credit pack or use the default one
+  //   if (packId) {
+  //     setSelectedCreditPackId(packId);
+  //   }
     
-    // Open the credit modal
-    openCreditModal();
-  };
+  //   // Open the credit modal
+  //   openCreditModal();
+  // };
   
   // Function to handle credit updates from the modal
   const handleCreditUpdate = (newCredits: number) => {
@@ -297,7 +300,7 @@ export default function Dashboard() {
             </div>
             
             
-            <div className="bg-gray-50 p-8 rounded-lg text-center">
+            <div className="bg-gray-50 p-8 rounded-lg text-center mt-4">
               <p className="text-gray-500">Start solving problems to see your activity here!</p>
               <Button 
                 color="primary" 

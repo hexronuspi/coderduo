@@ -11,15 +11,13 @@ import {
   Card,
   CardBody,
   Divider,
-  RadioGroup,
-  Radio,
-  useDisclosure
 } from "@nextui-org/react";
-import { Check, Zap, ArrowRight } from "lucide-react";
+import { Check } from "lucide-react";
 import { fetchCreditPacks } from "@/lib/subscription";
 import { Plan } from "@/types/subscription";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { initiateRazorpayPayment, loadRazorpayScript } from "@/lib/payment";
+import { loadRazorpayScript } from "@/lib/payment";
+import { RazorpayOptions, RazorpaySuccessResponse } from "@/types/razorpay";
 
 interface CreditModalProps {
   isOpen: boolean;
@@ -34,7 +32,7 @@ export function CreditModal({
   isOpen,
   onClose,
   userId,
-  currentCredits,
+  // currentCredits,
   onCreditsUpdated,
   selectedPackId
 }: CreditModalProps) {
@@ -149,14 +147,14 @@ export function CreditModal({
       console.log("Order created:", orderData);
       
       // Check if Razorpay is loaded
-      if (!(window as any).Razorpay) {
+      if (!window.Razorpay) {
         console.error("Razorpay not loaded!");
         alert("Payment gateway not available. Please refresh the page and try again.");
         return;
       }
       
       // Configure Razorpay options
-      const options = {
+      const options: RazorpayOptions = {
         key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_Y6gGTPKFwvRnJu",
         amount: orderData.amount,
         currency: orderData.currency || "INR",
@@ -176,7 +174,7 @@ export function CreditModal({
         theme: {
           color: '#6366F1',
         },
-        handler: async function(response: any) {
+        handler: async function(response: RazorpaySuccessResponse) {
           console.log("Payment successful, verifying...", response);
           
           // Verify payment
@@ -205,17 +203,19 @@ export function CreditModal({
             
             // Close the modal
             onClose();
-          } else {
-            console.error("Payment verification failed:", verificationData);
-            alert("Payment verification failed. Please contact support.");
           }
         }
       };
 
       // Initialize and open Razorpay
       console.log("Opening Razorpay with options:", { key: options.key, order_id: options.order_id });
-      const razorpay = new (window as any).Razorpay(options);
-      razorpay.open();
+      
+      if (window.Razorpay) {
+        const razorpay = new window.Razorpay(options);
+        razorpay.open();
+      } else {
+        alert("Payment gateway not available. Please refresh the page and try again.");
+      }
       
     } catch (error) {
       console.error("Error in handleDirectPurchase:", error);

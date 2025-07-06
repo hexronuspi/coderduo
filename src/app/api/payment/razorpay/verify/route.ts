@@ -37,7 +37,6 @@ export async function POST(req: NextRequest) {
       razorpay_order_id, 
       razorpay_payment_id, 
       razorpay_signature,
-      packId, 
       userId,
       credits
     } = await req.json();

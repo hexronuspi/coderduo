@@ -1,5 +1,5 @@
-import { Card, CardBody, CardFooter, Button } from "@nextui-org/react";
-import { BrainCircuit, BookOpen, Code, Lightbulb, ArrowRight, Sparkles, BarChart } from "lucide-react";
+import { Card, CardBody } from "@nextui-org/react";
+import { BrainCircuit, BookOpen, Lightbulb, Sparkles } from "lucide-react";
 
 export function About() {
   return (
