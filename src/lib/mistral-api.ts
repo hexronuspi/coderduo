@@ -13,6 +13,13 @@ export interface ChatMessage {
 export async function chatWithMistral(
   messages: ChatMessage[],
   modelName: string = 'mistral-large-latest',
+  questionContext?: { 
+    title: string; 
+    question: string; 
+    hint?: string[]; 
+    solution?: string;
+    [key: string]: string | string[] | undefined;
+  },
   onBusyKeysUpdate?: (count: number) => void
 ): Promise<string> {
   try {
@@ -21,12 +28,14 @@ export async function chatWithMistral(
     const requestBody = {
       model: modelName,
       messages: messages,
+      question: questionContext, // Include the question object in the request
     };
     
     console.log('Request payload:', {
       model: modelName,
       messageCount: messages.length,
-      roles: messages.map(m => m.role)
+      roles: messages.map(m => m.role),
+      hasQuestionContext: !!questionContext
     });
     
     const response = await fetch('/api/chat/mistral', {
@@ -169,6 +178,9 @@ export function useMistralChat(questionTitle: string) {
         systemPrompt = `You are a helpful AI assistant answering questions about: ${context.title}. The question is: ${context.question}`;
       }
       
+      // Log that we're sending the full question context to API
+      console.log('Sending full question context to API for improved handling');
+      
       // Add user message to the chat
       const newUserMessage: ChatMessage = { role: 'user', content: userMessage };
       const updatedMessages = [...messages, newUserMessage];
@@ -208,7 +220,8 @@ export function useMistralChat(questionTitle: string) {
           const response = await chatWithMistral(
             apiMessages, 
             'mistral-large-latest', 
-            (busyCount) => setBusyKeyCount(busyCount)
+            context, // Pass the question context
+            (busyCount: number) => setBusyKeyCount(busyCount)
           );
           
           // Add the assistant's response to the chat

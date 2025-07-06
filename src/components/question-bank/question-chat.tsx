@@ -28,8 +28,10 @@ export function QuestionChat({ question }: QuestionChatProps) {
     clearChat 
   } = useMistralChat(question.title);
 
-  // Prepare the context for the chat
+  // Prepare the context for the chat using the full question object
+  // This way we send the complete question data to the API
   const context = {
+    ...question,
     title: question.title,
     question: question.question,
     hint: question.hint || [],
@@ -203,7 +205,7 @@ export function QuestionChat({ question }: QuestionChatProps) {
           {error && (
             error.includes('API rate limit') || error.includes('busy') || error.includes('try again') ? (
               <RateLimitError onRetry={handleSendMessage} />
-            ) : error.includes('authentication') || error.includes('API key') || error.includes('auth') ? (
+            ) : error.includes('authentication') || error.includes('API key') || error.includes('auth') || error.includes('Unauthorized') || error.includes('401') ? (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -214,8 +216,26 @@ export function QuestionChat({ question }: QuestionChatProps) {
                   <AlertTriangle size={16} />
                   <span className="font-medium">Authentication Error</span>
                 </div>
-                <p>There&apos;s an issue with the API authentication. This has been logged for the administrators to fix.</p>
-                <p className="text-xs mt-2 text-danger-500">This is a configuration issue that requires attention from the system administrator.</p>
+                <p>There&apos;s an issue with your session. You may need to sign in again to continue using the chat feature.</p>
+                <div className="flex gap-2 mt-3">
+                  <Button
+                    size="sm"
+                    color="primary"
+                    variant="flat"
+                    href="/auth"
+                  >
+                    Sign In
+                  </Button>
+                  <Button
+                    size="sm"
+                    color="danger"
+                    variant="light"
+                    onPress={() => clearChat()} // Clear the chat instead of trying to set error to null
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+                <p className="text-xs mt-3 text-danger-500">If the problem persists after signing in, please contact support.</p>
               </motion.div>
             ) : (
               <motion.div

@@ -8,6 +8,13 @@ interface ChatRequestBody {
     content: string;
   }>;
   model?: string;
+    question?: {
+    title: string;
+    question: string;
+    hint?: string[];
+    solution?: string;
+    [key: string]: unknown; // Allow for other question fields
+  };
 }
 
 // Define API key interface
@@ -95,6 +102,20 @@ if (apiKeys.length > 0) {
     prefix: k.key.substring(0, 3) + '...' + k.key.substring(k.key.length - 3),
     isAvailable: k.isAvailable
   })));
+  
+  // Validate API keys - log warnings for potential issues
+  const suspiciousKeys = apiKeys.filter(k => 
+    k.key.length < 20 || // Keys are usually long
+    k.key === 'MISTRAL_API_KEY' || // Literal env var names
+    k.key === 'MISTRAL1' ||
+    k.key === 'YOUR_API_KEY_HERE' || // Placeholder values
+    k.key === process.env.MISTRAL // Env var name instead of value
+  );
+  
+  if (suspiciousKeys.length > 0) {
+    console.warn(`⚠️ WARNING: ${suspiciousKeys.length} API keys appear to be invalid or improperly configured.`);
+    console.warn('This may cause authentication errors. Check your environment variables.');
+  }
 } else {
   console.log('No API keys available!');
 }
@@ -340,7 +361,7 @@ export async function POST(request: NextRequest) {
       if (process.env.NODE_ENV !== 'development') {
         return NextResponse.json(
           { error: 'Authentication error', details: authError instanceof Error ? authError.message : String(authError) },
-          { status: 500 }
+          { status: 401 } // Changed to 401 to be consistent with other auth errors
         );
       } else {
         console.log('Continuing in development mode despite authentication error');
@@ -366,6 +387,18 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid request: messages array is required' },
         { status: 400 }
       );
+    }
+    
+    // Log if we received a question object
+    if (body.question) {
+      console.log('Received question context in request:', { 
+        title: body.question.title,
+        questionLength: body.question.question?.length || 0,
+        hasHints: Array.isArray(body.question.hint) && body.question.hint.length > 0,
+        hasSolution: !!body.question.solution
+      });
+    } else {
+      console.log('No question context received in request');
     }
     
     // Get an available API key
