@@ -35,12 +35,16 @@ function AuthContent() {
       setError(`Authentication error: ${errorParam}`);
     }
 
+    // Get redirectTo parameter (where to send user after successful login)
+    const redirectTo = searchParams.get("redirectTo") || '/dashboard';
+    
     // Set up auth state change listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (event === 'SIGNED_IN' && session) {
-          // Redirect to dashboard when signed in
-          router.push('/dashboard');
+          // Redirect to the stored path or dashboard when signed in
+          console.log(`Authentication successful, redirecting to ${redirectTo}`);
+          router.push(redirectTo);
         }
       }
     );
@@ -115,7 +119,9 @@ function AuthContent() {
                   },
                 }}
                 providers={['google']}
-                redirectTo={`/auth/callback`}
+                redirectTo={`${window.location.origin}/auth/callback?redirectTo=${
+                  searchParams.get("redirectTo") || "/dashboard"
+                }`}
                 onlyThirdPartyProviders={true}
               />
             )}
