@@ -23,6 +23,8 @@ interface ApiKey {
   isAvailable: boolean;
   lastUsed: number;
   errorCount: number;
+  triedWithLargeModel?: boolean; // Track if this key has been tried with large model
+  triedWithSmallModel?: boolean; // Track if this key has been tried with small model
 }
 
 // Initialize API keys from environment variables
@@ -167,7 +169,7 @@ const resetUnavailableKeys = () => {
 };
 
 // Get the next available API key with improved distribution
-const getAvailableApiKey = (): ApiKey | null => {
+const getAvailableApiKey = (preferredModel: 'large' | 'small' = 'large'): ApiKey | null => {
   // Always reset any keys that should be available again
   resetUnavailableKeys();
   
@@ -185,10 +187,33 @@ const getAvailableApiKey = (): ApiKey | null => {
     return dummyKeys[0];
   }
   
-  // For real API keys, use a smarter selection algorithm:
+  // Filter keys based on which model we're trying to use now
+  let filteredKeys = availableKeys;
+  if (preferredModel === 'large') {
+    // If we're trying large model, filter out keys that have already failed with large
+    filteredKeys = availableKeys.filter(key => !key.triedWithLargeModel);
+    
+    // If no keys are left that haven't been tried with large, reset all keys and try again
+    if (filteredKeys.length === 0) {
+      console.log('All keys have been tried with large model, retrying with small model');
+      return null; // Signal to the caller to try with small model instead
+    }
+  } else if (preferredModel === 'small') {
+    // If we're trying small model, filter out keys that have already failed with small
+    filteredKeys = availableKeys.filter(key => !key.triedWithSmallModel);
+    
+    // If no keys are left that haven't been tried with small, we've exhausted all options
+    if (filteredKeys.length === 0) {
+      console.log('All keys have been tried with both large and small models');
+      return null;
+    }
+  }
+  
+  // If we have filtered keys, use those; otherwise fall back to all available keys
+  const keysToConsider = filteredKeys.length > 0 ? filteredKeys : availableKeys;
   
   // First, prioritize keys with no errors
-  const noErrorKeys = availableKeys.filter(key => key.errorCount === 0);
+  const noErrorKeys = keysToConsider.filter(key => key.errorCount === 0);
   if (noErrorKeys.length > 0) {
     // From the no-error keys, select the least recently used one
     return noErrorKeys.sort((a, b) => a.lastUsed - b.lastUsed)[0];
@@ -199,7 +224,7 @@ const getAvailableApiKey = (): ApiKey | null => {
   // - Used longer ago
   
   // Calculate a score for each key (lower is better)
-  const keyScores = availableKeys.map(key => {
+  const keyScores = keysToConsider.map(key => {
     const errorScore = key.errorCount * 10; // Higher weight for errors
     const timeScore = (Date.now() - key.lastUsed) / -10000; // Negative because lower times are worse
     return { key, score: errorScore + timeScore };
@@ -213,7 +238,7 @@ const getAvailableApiKey = (): ApiKey | null => {
 };
 
 // Mark an API key as unavailable with reason tracking
-const markKeyUnavailable = (key: ApiKey, reason: string = 'unknown') => {
+const markKeyUnavailable = (key: ApiKey, reason: string = 'unknown', currentModel: string = 'mistral-large-latest') => {
   // In development mode with dummy keys, don't mark as unavailable for too long
   const isDummyKey = key.key.startsWith('DUMMY_MISTRAL_KEY_');
   
@@ -229,6 +254,15 @@ const markKeyUnavailable = (key: ApiKey, reason: string = 'unknown') => {
     
     console.log(`Development mode: Keeping dummy key available despite ${reason} error`);
     return;
+  }
+  
+  // Track which model this key has been tried with
+  if (currentModel === 'mistral-large-latest') {
+    key.triedWithLargeModel = true;
+    console.log(`Marking key as tried with large model due to: ${reason}`);
+  } else if (currentModel === 'mistral-small') {
+    key.triedWithSmallModel = true;
+    console.log(`Marking key as tried with small model due to: ${reason}`);
   }
   
   // For real keys or production environment
@@ -404,9 +438,26 @@ export async function POST(request: NextRequest) {
       console.log('No question context received in request');
     }
     
-    // Get an available API key
-    const apiKey = getAvailableApiKey();
+    // Try with the larger model first, then fall back to the smaller model if needed
+    let currentModelSize: 'large' | 'small' = 'large';
+    const defaultLargeModel = 'mistral-large-latest';
+    const fallbackSmallModel = 'mistral-small'; 
     
+    // First attempt: try with large model
+    let apiKey = getAvailableApiKey('large');
+    
+    // If no keys are available for large model, try again with small model
+    if (!apiKey) {
+      console.log('No available API keys for large model, trying small model');
+      currentModelSize = 'small';
+      apiKey = getAvailableApiKey('small');
+      
+      if (apiKey) {
+        console.log('Found API key for small model');
+      }
+    }
+    
+    // If we still don't have a key after trying both models
     if (!apiKey) {
       // If in development mode, create a temporary dummy key for this request
       if (process.env.NODE_ENV === 'development') {
@@ -418,7 +469,7 @@ export async function POST(request: NextRequest) {
           id: 'mock-response-id',
           object: 'chat.completion',
           created: Date.now(),
-          model: body.model || 'mistral-large-latest',
+          model: body.model || defaultLargeModel,
           choices: [
             {
               index: 0,
@@ -443,7 +494,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { 
           error: 'API rate limit reached. Please try again later.',
-          message: 'All API keys are currently busy. This typically resolves in 30-60 seconds.',
+          message: 'All API keys have been tried with both models. This typically resolves in 30-60 seconds.',
           busyKeyCount: apiKeys.length,
           totalKeyCount: apiKeys.length,
           retryAfter: 30, // Suggest retry after 30 seconds
@@ -458,8 +509,17 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Configure the model
-    const model = body.model || 'mistral-large-latest';
+    // Configure the model based on our current attempt
+    let model: string;
+    if (body.model) {
+      // If user specified a model, use that
+      model = body.model;
+      console.log(`Using user-specified model: ${model}`);
+    } else {
+      // Otherwise use our determined model based on key availability
+      model = currentModelSize === 'large' ? defaultLargeModel : fallbackSmallModel;
+      console.log(`Using ${currentModelSize} model: ${model}`);
+    }
     
     // For development mode, provide a mock response if we're using dummy keys
     if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
@@ -496,7 +556,7 @@ export async function POST(request: NextRequest) {
         // Log masking the key for security
         const keyPrefix = apiKey.key.substring(0, 3);
         const keySuffix = apiKey.key.substring(apiKey.key.length - 3);
-        console.log(`Making Mistral API request with key ${keyPrefix}...${keySuffix} (length: ${apiKey.key.length})`);
+        console.log(`Making Mistral API request with key ${keyPrefix}...${keySuffix} (length: ${apiKey.key.length}) using model: ${model}`);
         
         // Debug log to help diagnose issues
         if (process.env.NODE_ENV === 'development') {
@@ -506,7 +566,9 @@ export async function POST(request: NextRequest) {
             lastChar: apiKey.key.charAt(apiKey.key.length - 1),
             hasWhitespace: /\s/.test(apiKey.key),
             prefix: keyPrefix,
-            suffix: keySuffix
+            suffix: keySuffix,
+            model: model,
+            modelSize: currentModelSize
           });
         }
         
@@ -560,7 +622,7 @@ export async function POST(request: NextRequest) {
             console.error(`Key length: ${apiKey.key.length}, first few chars: ${apiKey.key.substring(0, 10)}...`);
             console.error(`Error details:`, errorData);
             console.error(`Authorization header: Bearer ${apiKey.key.substring(0, 3)}...${apiKey.key.substring(apiKey.key.length - 3)}`);
-            markKeyUnavailable(apiKey, 'authentication_error');
+            markKeyUnavailable(apiKey, 'authentication_error', model);
             
             // Return a specific error for authentication issues
             return NextResponse.json(
@@ -581,7 +643,7 @@ export async function POST(request: NextRequest) {
           // Handle rate limiting or quota exceeded
           if (response.status === 429 || response.status === 403) {
             const reason = response.status === 429 ? 'rate_limit' : 'quota_exceeded';
-            markKeyUnavailable(apiKey, reason);
+            markKeyUnavailable(apiKey, reason, model);
             
             // If in development and we have "dummy keys", just return a mock response instead of an error
             if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {
@@ -688,7 +750,7 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         console.error(`Error with Mistral API key:`, error);
         const errorMessage = error instanceof Error ? error.message : String(error);
-        markKeyUnavailable(apiKey, `connection_error: ${errorMessage.substring(0, 50)}`);
+        markKeyUnavailable(apiKey, `connection_error: ${errorMessage.substring(0, 50)}`, model);
         
         // If in development with dummy keys, return a mock response instead of an error
         if (process.env.NODE_ENV === 'development' && apiKey.key.startsWith('DUMMY_MISTRAL_KEY_')) {

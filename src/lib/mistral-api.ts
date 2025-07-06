@@ -12,7 +12,7 @@ export interface ChatMessage {
 // Chat completion API call through our backend endpoint
 export async function chatWithMistral(
   messages: ChatMessage[],
-  modelName: string = 'mistral-large-latest',
+  modelName: string = 'mistral-large-latest',  // Changed to mistral-small which has lower requirements
   questionContext?: { 
     title: string; 
     question: string; 
@@ -219,7 +219,7 @@ export function useMistralChat(questionTitle: string) {
           // Send the request to the API
           const response = await chatWithMistral(
             apiMessages, 
-            'mistral-large-latest', 
+            'mistral-small', // Changed to mistral-small which has lower requirements
             context, // Pass the question context
             (busyCount: number) => setBusyKeyCount(busyCount)
           );
