@@ -120,7 +120,7 @@ function AuthContent() {
                 }}
                 providers={['google']}
                 redirectTo={`${window.location.origin}/auth/callback?redirectTo=${
-                  searchParams.get("redirectTo") || "/dashboard"
+                  encodeURIComponent(searchParams.get("redirectTo") || "/dashboard")
                 }`}
                 onlyThirdPartyProviders={true}
               />

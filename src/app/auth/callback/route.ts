@@ -7,24 +7,36 @@ export async function GET(req: NextRequest) {
   const requestUrl = new URL(req.url);
   const code = requestUrl.searchParams.get('code');
   
-  // Get the original redirect URL from state parameter or other cookie if available
+  // Get the original redirect URL from state parameter
   const redirectTo = requestUrl.searchParams.get('redirectTo') || '/dashboard';
   
-  // Extract the referring site (useful for cross-domain authentication)
-  const referer = req.headers.get('referer') || requestUrl.origin;
+  // CRITICAL: Use the redirect_to parameter from the OAuth flow if available
+  // This is passed by Supabase and contains the original URL the OAuth flow was initiated from
+  const supabaseRedirectTo = requestUrl.searchParams.get('redirect_to');
   
-  // Determine the correct origin (production or localhost)
-  const origin = process.env.NEXT_PUBLIC_SITE_URL || requestUrl.origin;
+  // Parse this URL to extract its origin - this will be the actual origin of your application
+  // regardless of where it's hosted (localhost, production, etc.)
+  let authOrigin = requestUrl.origin; // Default fallback
   
-  console.log(`Auth callback received from: ${referer}`);
-  console.log(`Using origin for redirect: ${origin}`);
+  if (supabaseRedirectTo) {
+    try {
+      const redirectUrl = new URL(supabaseRedirectTo);
+      authOrigin = redirectUrl.origin;
+      console.log(`Using origin from redirect_to param: ${authOrigin}`);
+    } catch (e) {
+      console.error(`Invalid redirect_to URL: ${supabaseRedirectTo}`, e);
+    }
+  }
+  
+  console.log(`Auth callback URL: ${requestUrl}`);
+  console.log(`Auth origin determined: ${authOrigin}`);
   
   // If there's no code, we can't proceed with authentication
   if (!code) {
     console.error('No code found in OAuth callback');
-    return NextResponse.redirect(
-      new URL('/auth?error=No authentication code provided', origin)
-    );
+    const errorUrl = new URL('/auth?error=No authentication code provided', authOrigin);
+    console.log(`No code redirect to: ${errorUrl.toString()}`);
+    return NextResponse.redirect(errorUrl.toString());
   }
 
   try {
@@ -39,13 +51,17 @@ export async function GET(req: NextRequest) {
     }
     
     // Log successful authentication
-    console.log('Authentication successful, redirecting to', redirectTo);
+    console.log('Authentication successful');
     
-    // Store any additional user information in the database if needed
-    // This is a good place to create or update user profiles
+    // Ensure redirectTo has a leading slash for path-based redirects
+    const normalizedRedirectTo = redirectTo.startsWith('/') ? redirectTo : `/${redirectTo}`;
+    
+    // Construct the final redirect URL using the determined origin
+    const finalRedirectUrl = new URL(normalizedRedirectTo, authOrigin);
+    console.log(`Redirecting to: ${finalRedirectUrl.toString()}`);
     
     // Redirect to the appropriate page (dashboard by default)
-    return NextResponse.redirect(new URL(redirectTo, origin));
+    return NextResponse.redirect(finalRedirectUrl.toString());
     
   } catch (err) {
     // Handle any errors that occurred during the auth process
@@ -53,14 +69,16 @@ export async function GET(req: NextRequest) {
     const errorMessage = err instanceof Error ? err.message : 'Authentication failed';
     
     // Log additional details for debugging
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('Request URL:', req.url);
-      console.log('Headers:', Object.fromEntries(req.headers.entries()));
-    }
+    console.log('Auth error debug info:');
+    console.log('- Request URL:', req.url);
+    console.log('- Auth origin:', authOrigin);
+    console.log('- Error details:', errorMessage);
     
-    return NextResponse.redirect(
-      new URL(`/auth?error=${encodeURIComponent(errorMessage)}`, origin)
-    );
+    // Create error redirect URL with the same origin determination
+    const errorUrl = new URL(`/auth?error=${encodeURIComponent(errorMessage)}`, authOrigin);
+    console.log(`Error redirect to: ${errorUrl.toString()}`);
+    
+    return NextResponse.redirect(errorUrl.toString());
   }
 }
 
