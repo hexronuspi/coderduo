@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
 // Use your actual Razorpay API keys
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_Y6gGTPKFwvRnJu';
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || 'rzp_test_Y6gGTPKFwvRnJu';
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || 'QwJJ7UiLWr5A6AnFAc38VRED';
 
 // Create a Supabase client with the service role key for admin operations

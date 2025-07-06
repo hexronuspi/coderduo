@@ -155,7 +155,7 @@ export function CreditModal({
       
       // Configure Razorpay options
       const options: RazorpayOptions = {
-        key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_Y6gGTPKFwvRnJu",
+        key: orderData.keyId || process.env.RAZORPAY_KEY_ID || "rzp_test_Y6gGTPKFwvRnJu",
         amount: orderData.amount,
         currency: orderData.currency || "INR",
         name: "Coder Duo",
