@@ -203,6 +203,20 @@ export function QuestionChat({ question }: QuestionChatProps) {
           {error && (
             error.includes('API rate limit') || error.includes('busy') || error.includes('try again') ? (
               <RateLimitError onRetry={handleSendMessage} />
+            ) : error.includes('authentication') || error.includes('API key') || error.includes('auth') ? (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+                className="p-4 bg-danger-50 dark:bg-danger-900/30 border border-danger-200 dark:border-danger-800 rounded-lg text-danger-700 dark:text-danger-400 text-sm"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle size={16} />
+                  <span className="font-medium">Authentication Error</span>
+                </div>
+                <p>There's an issue with the API authentication. This has been logged for the administrators to fix.</p>
+                <p className="text-xs mt-2 text-danger-500">This is a configuration issue that requires attention from the system administrator.</p>
+              </motion.div>
             ) : (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}

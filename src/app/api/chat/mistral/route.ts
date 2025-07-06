@@ -24,7 +24,7 @@ const initApiKeys = (): ApiKey[] => {
   
   // Try to load from MISTRAL_API_KEY_N format
   for (let i = 1; i <= 10; i++) {
-    const envKey = process.env[`MISTRAL_API_KEY_${i}`];
+    const envKey = process.env[`MISTRAL${i}`];
     if (envKey) {
       keys.push({
         key: envKey,
@@ -49,7 +49,7 @@ const initApiKeys = (): ApiKey[] => {
   }
   
   // Check the main API key
-  const mainApiKey = process.env.MISTRAL_API_KEY;
+  const mainApiKey = process.env.MISTRAL;
   if (mainApiKey) {
     keys.push({
       key: mainApiKey,
@@ -504,6 +504,22 @@ export async function POST(request: NextRequest) {
             console.error(`Mistral API error: ${response.status} (failed to parse error JSON)`, jsonError);
             console.error(`Failed to parse Mistral API error response: ${response.statusText}`);
             errorData = { error: { message: response.statusText } };
+          }
+          
+          // Handle authentication errors
+          if (response.status === 401) {
+            console.error(`Authentication error with Mistral API: Key ${apiKey.key.substring(0, 3)}...${apiKey.key.substring(apiKey.key.length - 3)} is invalid or expired`);
+            markKeyUnavailable(apiKey, 'authentication_error');
+            
+            // Return a specific error for authentication issues
+            return NextResponse.json(
+              { 
+                error: 'API authentication error. Please check your API keys.',
+                detail: 'The Mistral API key was rejected. This requires administrator attention.',
+                isAuthError: true
+              },
+              { status: 401 }
+            );
           }
           
           // Handle rate limiting or quota exceeded
