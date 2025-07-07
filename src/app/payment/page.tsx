@@ -11,6 +11,7 @@ import { Check } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { trackError, getTrackedErrors } from "@/lib/error-tracker";
 import DiagnosticHelper from "@/components/ui/diagnostic-helper";
+import { safeNavigate } from "@/lib/navigation";
 
 export default function PaymentPage() {
   const router = useRouter();
@@ -36,7 +37,7 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
   useEffect(() => {
     // Prevent browser back/forward navigation issues with payment
     window.addEventListener('popstate', () => {
-      router.push('/dashboard');
+      safeNavigate(router, '/dashboard');
     });
     
     // Prevent multiple executions
@@ -47,7 +48,7 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
       
       if (!packId || !userId) {
         toast.error("Missing Information", "Required payment information is missing.");
-        router.push('/dashboard');
+        safeNavigate(router, '/dashboard');
         return;
       }
 
@@ -83,7 +84,7 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
         
         if (!pack) {
           toast.error("Invalid Pack", "The selected credit pack is no longer available.");
-          router.push('/dashboard');
+          safeNavigate(router, '/dashboard');
           return;
         }
         
@@ -120,7 +121,7 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
       } catch (error) {
         trackError('loadData', error, { packId, userId });
         toast.error("Setup Error", "Could not initialize payment. Please try again.");
-        setTimeout(() => router.push('/dashboard'), 2000);
+        setTimeout(() => safeNavigate(router, '/dashboard'), 2000);
       } finally {
         setIsLoading(false);
       }
@@ -305,14 +306,14 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
               setPaymentAttempts(0);
               
               // Redirect back to dashboard after a short delay
-              setTimeout(() => router.push('/dashboard'), 1500);
+              setTimeout(() => safeNavigate(router, '/dashboard'), 1500);
             } else {
               console.error("Payment verification failed:", verificationData);
               toast.warning(
                 "Payment Received",
                 "Your payment was successful, but there was an issue updating your credits. Our team will review and update your account shortly."
               );
-              setTimeout(() => router.push('/dashboard'), 3000);
+              setTimeout(() => safeNavigate(router, '/dashboard'), 3000);
             }
           } catch (error: unknown) {
             trackError('paymentVerification', error, {
@@ -333,7 +334,7 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
               );
             }
             
-            setTimeout(() => router.push('/dashboard'), 3000);
+            setTimeout(() => safeNavigate(router, '/dashboard'), 3000);
           } finally {
             setIsLoading(false);
           }
@@ -504,7 +505,7 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
           className="w-full"
           onPress={() => {
             toast.info("Purchase Cancelled", "You have cancelled the purchase.");
-            router.push('/dashboard');
+            safeNavigate(router, '/dashboard');
           }}
           disabled={isLoading}
         >
@@ -514,7 +515,7 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
         <div className="text-center mt-2">
           <button
             className="text-sm text-gray-500 hover:text-primary-600 transition-colors"
-            onClick={() => router.push('/dashboard')}
+            onClick={() => safeNavigate(router, '/dashboard')}
             disabled={isLoading}
           >
             Return to Dashboard
