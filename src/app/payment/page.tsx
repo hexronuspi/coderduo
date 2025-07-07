@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { loadRazorpayScript } from "@/lib/payment";
@@ -13,7 +13,7 @@ import { trackError, getTrackedErrors } from "@/lib/error-tracker";
 import DiagnosticHelper from "@/components/ui/diagnostic-helper";
 import { safeNavigate } from "@/lib/navigation";
 
-export default function PaymentPage() {
+function PaymentContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const packId = searchParams.get('packId');
@@ -546,5 +546,18 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
       
       <toast.ToastContainer />
     </div>
+  );
+}
+
+export default function PaymentPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex flex-col justify-center items-center p-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500 mb-4"></div>
+        <p className="text-gray-600">Loading payment page...</p>
+      </div>
+    }>
+      <PaymentContent />
+    </Suspense>
   );
 }
