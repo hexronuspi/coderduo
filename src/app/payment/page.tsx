@@ -239,7 +239,7 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
       
       // Configure Razorpay options with optimizations for mobile
       const options: RazorpayOptions = {
-        key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_Y6gGTPKFwvRnJu",
+        key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
         amount: orderData.amount,
         currency: orderData.currency || "INR",
         name: "Coder Duo",
@@ -355,8 +355,15 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
       };
 
       try {
+        // Check if key is available before initializing
+        if (!options.key || options.key.length < 10) {
+          throw new Error("Invalid Razorpay key. Please contact support.");
+        }
+
         // Initialize and open Razorpay with error handling
         const razorpay = new window.Razorpay(options);
+        
+        // Add error listeners
         razorpay.on('payment.error', function(resp: unknown) {
           console.error("Razorpay payment error:", resp);
           toast.error(
@@ -366,7 +373,14 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
           setIsLoading(false);
         });
         
-        razorpay.open();
+        // Open the payment dialog with error handling
+        try {
+          razorpay.open();
+        } catch (openError) {
+          console.error("Error opening Razorpay:", openError);
+          toast.error("Payment Error", "Could not open payment window. Please try again later.");
+          setIsLoading(false);
+        }
       } catch (razorpayError) {
         trackError('razorpayInitialization', razorpayError);
         toast.error(
@@ -389,37 +403,51 @@ const [selectedPack, setSelectedPack] = useState<CreditPack | null>(null);
   
   // Update loading message after a delay and show diagnostics for extended loading
   useEffect(() => {
-    if (isLoading) {
-      // Set timeout to update message if loading takes too long
-      const timeout = setTimeout(() => {
-        setLoadingMessage("This is taking longer than expected. Please wait a moment...");
+    try {
+      if (isLoading) {
+        // Set timeout to update message if loading takes too long
+        const timeout = setTimeout(() => {
+          try {
+            setLoadingMessage("This is taking longer than expected. Please wait a moment...");
+            
+            // Set a second timeout for extended loading
+            const extendedTimeout = setTimeout(() => {
+              try {
+                setLoadingMessage("Still working... You can try refreshing if this continues.");
+                
+                // Show diagnostics after extended loading time
+                const diagnosticTimeout = setTimeout(() => {
+                  setShowDiagnostics(true);
+                }, 10000);
+                
+                setLoadingTimeout(diagnosticTimeout);
+              } catch (err) {
+                console.error("Error in nested timeout:", err);
+              }
+            }, 15000);
+            
+            setLoadingTimeout(extendedTimeout);
+          } catch (err) {
+            console.error("Error in timeout callback:", err);
+          }
+        }, 8000);
         
-        // Set a second timeout for extended loading
-        const extendedTimeout = setTimeout(() => {
-          setLoadingMessage("Still working... You can try refreshing if this continues.");
-          
-          // Show diagnostics after extended loading time
-          const diagnosticTimeout = setTimeout(() => {
-            setShowDiagnostics(true);
-          }, 10000);
-          
-          setLoadingTimeout(diagnosticTimeout);
-        }, 15000);
+        setLoadingTimeout(timeout);
         
-        setLoadingTimeout(extendedTimeout);
-      }, 8000);
-      
-      setLoadingTimeout(timeout);
-      
-      return () => {
-        if (loadingTimeout) clearTimeout(loadingTimeout);
-      };
-    } else {
-      // Check for accumulated errors when not loading
-      const errors = getTrackedErrors();
-      if (errors.length >= 3) {
-        setShowDiagnostics(true);
+        return () => {
+          if (loadingTimeout) {
+            clearTimeout(loadingTimeout);
+          }
+        };
+      } else {
+        // Check for accumulated errors when not loading
+        const errors = getTrackedErrors();
+        if (errors.length >= 3) {
+          setShowDiagnostics(true);
+        }
       }
+    } catch (err) {
+      console.error("Error in loading effect:", err);
     }
   }, [isLoading, loadingTimeout]);
   

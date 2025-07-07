@@ -114,11 +114,17 @@ export function useToast() {
     message?: string;
   }>>([]);
 
-  const addToast = (type: ToastType, title: string, message?: string, duration?: number) => {
+  const addToast = (type: ToastType, title: string, message?: string, duration: number = 5000) => {
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { id, type, title, message }]);
+    // Prevent duplicate toasts by checking title and message
+    const isDuplicate = toasts.some(
+      toast => toast.title === title && toast.message === message
+    );
     
-    if (duration !== undefined) {
+    if (!isDuplicate) {
+      setToasts((prev) => [...prev, { id, type, title, message }]);
+      
+      // Always set a timeout to prevent toast accumulation
       setTimeout(() => {
         removeToast(id);
       }, duration);
