@@ -71,7 +71,7 @@ export function QuestionChat({ question }: QuestionChatProps) {
         
         <div className="flex items-center gap-2">
           {busyKeyCount > 0 && (
-            <Tooltip content={`${busyKeyCount}/10 API keys are currently busy. Higher numbers indicate increased wait times.`}>
+            <Tooltip content={`${busyKeyCount + 1} models are currently busy. Higher numbers indicate increased wait times.`}>
               <div className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full ${
                 busyKeyCount >= 8 ? 
                   'bg-danger-50 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400' : 
@@ -87,7 +87,7 @@ export function QuestionChat({ question }: QuestionChatProps) {
                   <RefreshCw size={12} className="animate-spin-slow" />
                 )}
                 <span>
-                  {busyKeyCount}/10 {busyKeyCount >= 8 ? 'overloaded' : busyKeyCount >= 5 ? 'busy' : 'active'}
+                  {busyKeyCount + 1}/10 {busyKeyCount >= 8 ? 'overloaded' : busyKeyCount >= 5 ? 'busy' : 'active'}
                 </span>
               </div>
             </Tooltip>
@@ -321,13 +321,13 @@ export function QuestionChat({ question }: QuestionChatProps) {
             
             {busyKeyCount >= 10 && (
               <div className="text-xs text-warning-600 dark:text-warning-400 mt-2 text-center">
-                All API keys are currently busy. Please wait a moment and try again.
+                All models are currently busy. Please wait a moment and try again.
               </div>
             )}
             
             {busyKeyCount >= 5 && busyKeyCount < 10 && (
               <div className="text-xs text-warning-600 dark:text-warning-400 mt-2 text-center">
-                API is experiencing high traffic ({busyKeyCount}/10 keys busy).
+                The AI Model is experiencing high traffic.
               </div>
             )}
           </CardBody>

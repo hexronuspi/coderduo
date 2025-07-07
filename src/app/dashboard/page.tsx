@@ -10,7 +10,7 @@ import {
   LogOut, Code, List, Home,
   BookOpen as BookIcon, Menu, ChevronDown,
   CreditCard, User, Plus,
-  CreditCardIcon
+  CreditCardIcon, History
 } from "lucide-react";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -20,6 +20,7 @@ import { fetchCreditPacks } from "@/lib/subscription";
 import { useRouter } from "next/navigation";
 import { CreditModal } from "@/components/credit/credit-modal";
 import { useToast } from "@/components/ui/toast";
+import UserHistoryView from "@/components/account/user-history";
 
 // Question Bank Section component for the dashboard
 interface QuestionBankSectionProps {
@@ -43,6 +44,7 @@ export default function Dashboard() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isCreditModalOpen, setIsCreditModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isFreeUser, setIsFreeUser] = useState(true);
   const [credits, setCredits] = useState(0);
   const [displayName, setDisplayName] = useState("coderduo");
@@ -184,6 +186,10 @@ export default function Dashboard() {
   // Functions for the profile modal
   const openProfileModal = () => setIsProfileModalOpen(true);
   const closeProfileModal = () => setIsProfileModalOpen(false);
+  
+  // Functions for history modal
+  const openHistoryModal = () => setIsHistoryModalOpen(true);
+  const closeHistoryModal = () => setIsHistoryModalOpen(false);
   
   // Functions for credit modal
   const openCreditModal = () => {
@@ -507,6 +513,18 @@ export default function Dashboard() {
                       <p className="text-xs text-gray-500">Manage your account settings</p>
                     </div>
                   </DropdownItem>
+                  <DropdownItem 
+                    key="history" 
+                    startContent={<History size={18} className="text-primary-600" />}
+                    onPress={openHistoryModal}
+                    className="py-2"
+                    textValue="Account History"
+                  >
+                    <div>
+                      <p className="font-medium">Account History</p>
+                      <p className="text-xs text-gray-500">View your plan and credit changes</p>
+                    </div>
+                  </DropdownItem>
                   <DropdownItem key="divider2" textValue="divider2">
                     <div className="h-px w-full bg-gray-200 my-2"></div>
                   </DropdownItem>
@@ -665,6 +683,17 @@ export default function Dashboard() {
             <Button
               variant="light"
               className="justify-start"
+              startContent={<History size={18} />}
+              onPress={() => {
+                openHistoryModal();
+                setMobileMenuOpen(false);
+              }}
+            >
+              Account History
+            </Button>
+            <Button
+              variant="light"
+              className="justify-start"
               startContent={<User size={18} />}
               onPress={() => {
                 openProfileModal();
@@ -806,6 +835,41 @@ export default function Dashboard() {
         onCreditsUpdated={handleCreditUpdate}
         selectedPackId={selectedCreditPackId || undefined}
       />
+
+      {/* Account History Modal */}
+      <Modal 
+        isOpen={isHistoryModalOpen} 
+        onClose={closeHistoryModal} 
+        backdrop="blur" 
+        size="xl" 
+        scrollBehavior="inside" 
+        classNames={{
+          backdrop: "bg-gradient-to-br from-primary-500/10 to-primary-900/20 backdrop-blur-md",
+          base: "max-w-screen-lg mx-auto",
+          body: "p-0"
+        }}
+        aria-labelledby="account-history-title"
+      >
+        <ModalContent className="rounded-xl shadow-2xl">
+          <ModalHeader className="flex flex-col gap-1 border-b pb-4 bg-gradient-to-r from-primary-50 to-white">
+            <h2 className="text-xl font-bold" id="account-history-title">Account History</h2>
+            <p className="text-sm text-gray-500">View your plan changes and credit purchases</p>
+          </ModalHeader>
+          <ModalBody className="p-0">
+            <div className="max-h-[70vh]">
+              {userId && <UserHistoryView userId={userId} />}
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button 
+              variant="bordered" 
+              onPress={closeHistoryModal}
+            >
+              Close
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
 
       {/* Toast Container for notifications */}
       <ToastContainer />

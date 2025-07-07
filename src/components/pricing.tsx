@@ -94,7 +94,7 @@ export function Pricing() {
                     <Zap className="w-8 h-8 text-gray-500" />
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900">{freePlan.name}</h3>
-                  <p className="text-gray-500 text-sm">{freePlan.credits} questions per month</p>
+                  <p className="text-gray-500 text-sm">{freePlan.credits} questions (One Time)</p>
                   <Divider className="my-4 w-full bg-gray-200" />
                   <div className="flex items-baseline">
                     <span className="text-4xl font-bold text-gray-900">

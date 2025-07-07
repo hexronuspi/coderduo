@@ -68,13 +68,6 @@ export async function GET(req: NextRequest) {
     console.error('Auth callback error:', err);
     const errorMessage = err instanceof Error ? err.message : 'Authentication failed';
     
-    // Log additional details for debugging
-    console.log('Auth error debug info:');
-    console.log('- Request URL:', req.url);
-    console.log('- Auth origin:', authOrigin);
-    console.log('- Error details:', errorMessage);
-    
-    // Create error redirect URL with the same origin determination
     const errorUrl = new URL(`/auth?error=${encodeURIComponent(errorMessage)}`, authOrigin);
     console.log(`Error redirect to: ${errorUrl.toString()}`);
     

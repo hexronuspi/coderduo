@@ -63,32 +63,54 @@ export const initiateRazorpayPayment = async ({
     }
 
     console.log("Creating order on server...");
-    // Create an order on your server
-    const orderResponse = await fetch('/api/payment/razorpay/create', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        packId: pack.id,
-        amount: pack.price,
-        planId: pack.id,
-        credits: pack.credits,
-        notes: {
-          userId: userId,
-          packName: pack.name,
-          credits: pack.credits, // Include credits in notes for webhook processing
-          packId: pack.id
-        }
-      }),
-    });
+    
+    // Create an order on your server with better error handling
+    let orderResponse;
+    try {
+      orderResponse = await fetch('/api/payment/razorpay/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          packId: pack.id,
+          amount: pack.price,
+          planId: pack.id,
+          credits: pack.credits,
+          notes: {
+            userId: userId,
+            packName: pack.name,
+            credits: pack.credits, // Include credits in notes for webhook processing
+            packId: pack.id
+          }
+        }),
+      });
 
-    console.log("Order API response status:", orderResponse.status);
+      console.log("Order API response status:", orderResponse.status);
+    } catch (networkError) {
+      console.error("Network error while creating order:", networkError);
+      throw new Error('Network error connecting to payment server. Please check your internet connection.');
+    }
     
     if (!orderResponse.ok) {
-      const errorData = await orderResponse.json();
+      let errorData;
+      try {
+        errorData = await orderResponse.json();
+      } catch (parseError) {
+        console.error("Failed to parse error response:", parseError);
+        throw new Error(`Server error: ${orderResponse.status} ${orderResponse.statusText}`);
+      }
+      
       console.error("Order creation failed:", errorData);
-      throw new Error(errorData.error || 'Failed to create order');
+      
+      // Provide more detailed error messages based on the response
+      if (errorData.message) {
+        throw new Error(`Payment error: ${errorData.message}`);
+      } else if (errorData.error) {
+        throw new Error(errorData.error);
+      } else {
+        throw new Error(`Failed to create order (${orderResponse.status})`);
+      }
     }
 
     const orderData = await orderResponse.json();
@@ -96,7 +118,7 @@ export const initiateRazorpayPayment = async ({
 
     // Configure Razorpay options
     const options: RazorpayOptions = {
-      key: orderData.keyId || process.env.RAZORPAY_KEY_ID || "",
+      key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "",
       amount: orderData.amount,
       currency: orderData.currency || "INR",
       name: 'Coder Duo',
@@ -123,25 +145,46 @@ export const initiateRazorpayPayment = async ({
       handler: async function(response: RazorpaySuccessResponse) {
         console.log("Payment successful, verifying...", response);
         try {
-          // Verify the payment on the server
-          const verificationResponse = await fetch('/api/payment/razorpay/verify', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_signature: response.razorpay_signature,
-              packId: pack.id,
-              userId: userId,
-              credits: pack.credits // Add credits here for direct verification
-            }),
-          });
+          // Verify the payment on the server with improved error handling
+          console.log("Sending payment verification request...");
+          let verificationResponse;
+          try {
+            verificationResponse = await fetch('/api/payment/razorpay/verify', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_signature: response.razorpay_signature,
+                packId: pack.id,
+                userId: userId,
+                credits: pack.credits, // Add credits here for direct verification
+                amount: pack.price, // Include amount for additional verification
+                currency: 'INR'
+              }),
+            });
+          } catch (networkError) {
+            console.error("Network error during payment verification:", networkError);
+            throw new Error("Network error during payment verification. Your payment may have been processed but couldn't be verified. Please contact support.");
+          }
 
           console.log("Verification response status:", verificationResponse.status);
-          const verificationData = await verificationResponse.json();
-          console.log("Verification result:", verificationData);
+          
+          if (!verificationResponse.ok) {
+            console.error("Verification server error:", verificationResponse.status, verificationResponse.statusText);
+            throw new Error(`Payment verification server error: ${verificationResponse.status}. Please contact support with your payment ID: ${response.razorpay_payment_id}`);
+          }
+          
+          let verificationData;
+          try {
+            verificationData = await verificationResponse.json();
+            console.log("Verification result:", verificationData);
+          } catch (parseError) {
+            console.error("Failed to parse verification response:", parseError);
+            throw new Error("Error processing verification response. Please contact support with your payment ID: " + response.razorpay_payment_id);
+          }
 
           if (verificationData.success) {
             onSuccess({

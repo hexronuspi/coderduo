@@ -265,7 +265,8 @@ export function useMistralChat(questionTitle: string) {
   // Send a message and get a response
   const sendMessage = async (
     userMessage: string, 
-    context: { title: string, question: string, hint: string[], solution: string }
+    context: { title: string, question: string, hint: string[], solution: string },
+    promptType?: string
   ) => {
     try {
       setIsLoading(true);
@@ -296,7 +297,14 @@ export function useMistralChat(questionTitle: string) {
           const promptsData = JSON.parse(responseText);
           console.log('Prompt templates loaded:', Object.keys(promptsData));
           
-          if (messages.length > 0) {
+          // Check if we're analyzing code
+          if (promptType === 'codeAnalysis' && promptsData.codeAnalysis) {
+            systemPrompt = promptsData.codeAnalysis
+              .replace('{title}', context.title)
+              .replace('{question}', context.question)
+              .replace('{hint}', context.hint ? context.hint.join('\n') : 'No hints available')
+              .replace('{solution}', context.solution || 'No solution available');
+          } else if (messages.length > 0) {
             // Use the prompt with history
             systemPrompt = promptsData.questionChatWithHistory
               .replace('{title}', context.title)

@@ -3,9 +3,18 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
-// Use your actual Razorpay API keys
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || 'rzp_test_Y6gGTPKFwvRnJu';
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || 'QwJJ7UiLWr5A6AnFAc38VRED';
+// Use environment variables for Razorpay API keys
+const RAZORPAY_KEY_ID = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID;
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+
+// Validate Razorpay credentials - Allow both test and live keys
+if (!RAZORPAY_KEY_ID || !(RAZORPAY_KEY_ID.startsWith('rzp_test_') || RAZORPAY_KEY_ID.startsWith('rzp_live_'))) {
+  console.error("Error: Invalid or missing RAZORPAY_KEY_ID environment variable");
+}
+
+if (!RAZORPAY_KEY_SECRET) {
+  console.error("Error: Missing RAZORPAY_KEY_SECRET environment variable");
+}
 
 // Create a Supabase client with the service role key for admin operations
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -88,32 +97,85 @@ export async function POST(req: NextRequest) {
       console.log('Note: payment_orders table may not exist yet, continuing with order creation', err);
     }
 
-    // Call Razorpay API to create an order
-    const response = await fetch('https://api.razorpay.com/v1/orders', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Basic ${Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')}`,
+    // Validate Razorpay credentials before API call
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      return NextResponse.json(
+        { error: 'Razorpay API keys not configured correctly' },
+        { status: 500 }
+      );
+    }
+
+    console.log(`Creating Razorpay order for user ${session.user.id}, amount: ${amount} INR`);
+    
+    // Prepare request payload
+    const orderPayload = {
+      amount: amount * 100, // Razorpay accepts amount in paise
+      currency: 'INR',
+      receipt: receipt || orderId,
+      notes: {
+        ...notes,
+        userId: session.user.id,
+        packId: packId,
+        credits: credits,
       },
-      body: JSON.stringify({
-        amount: amount * 100, // Razorpay accepts amount in paise
-        currency: 'INR',
-        receipt: receipt || orderId,
-        notes: {
-          ...notes,
-          userId: session.user.id,
-          packId: packId,
-          credits: credits,
+    };
+    
+    console.log(`Razorpay request payload: ${JSON.stringify(orderPayload, null, 2)}`);
+    
+    // Call Razorpay API to create an order with enhanced error handling
+    let response;
+    try {
+      response = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')}`,
         },
-      }),
-    });
+        body: JSON.stringify(orderPayload),
+      });
+      
+      if (!response.ok) {
+        // Get detailed error message from Razorpay
+        const errorText = await response.text();
+        console.error(`Razorpay API error (${response.status}): ${errorText}`);
+        
+        return NextResponse.json(
+          { 
+            error: `Razorpay API error: ${response.status}`,
+            details: errorText
+          },
+          { status: 500 }
+        );
+      }
+    } catch (fetchError) {
+      console.error('Network error calling Razorpay API:', fetchError);
+      return NextResponse.json(
+        { error: 'Network error connecting to payment gateway' },
+        { status: 500 }
+      );
+    }
 
     const razorpayOrder = await response.json();
 
     if (!razorpayOrder.id) {
-      console.error('Razorpay error:', razorpayOrder);
+      console.error('Razorpay error - Missing order ID in response:', razorpayOrder);
+      
+      // Check for specific error messages from Razorpay
+      if (razorpayOrder.error) {
+        if (razorpayOrder.error.description) {
+          return NextResponse.json(
+            { 
+              error: 'Razorpay error',
+              message: razorpayOrder.error.description,
+              code: razorpayOrder.error.code || 'unknown'
+            },
+            { status: 400 }
+          );
+        }
+      }
+      
       return NextResponse.json(
-        { error: 'Failed to create Razorpay order' },
+        { error: 'Failed to create Razorpay order', details: razorpayOrder },
         { status: 500 }
       );
     }
@@ -147,8 +209,16 @@ export async function POST(req: NextRequest) {
     // Log successful order creation
     console.log("Razorpay order created successfully:", razorpayOrder.id);
     
+    // Verify the Razorpay order was created successfully
+    console.log("Razorpay order created successfully:", {
+      orderId,
+      razorpayOrderId: razorpayOrder.id,
+      amount: amount * 100
+    });
+    
     // Return order details to the client
     return NextResponse.json({
+      success: true,
       orderId: orderId,
       razorpayOrderId: razorpayOrder.id,
       amount: amount * 100,
@@ -161,8 +231,18 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error('Error creating Razorpay order:', error);
+    
+    // Provide more detailed error information for debugging
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Payment gateway error',
+        message: errorMessage,
+        // Only include stack trace in development
+        ...(process.env.NODE_ENV === 'development' && { stack: errorStack })
+      },
       { status: 500 }
     );
   }

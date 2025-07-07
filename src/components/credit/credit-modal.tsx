@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   Modal,
   ModalContent,
@@ -18,6 +19,8 @@ import { Plan } from "@/types/subscription";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { loadRazorpayScript } from "@/lib/payment";
 import { RazorpayOptions, RazorpaySuccessResponse } from "@/types/razorpay";
+import { useToast } from "@/components/ui/toast";
+import { isMobileDevice } from "@/lib/utils";
 
 interface CreditModalProps {
   isOpen: boolean;
@@ -36,6 +39,7 @@ export function CreditModal({
   onCreditsUpdated,
   selectedPackId
 }: CreditModalProps) {
+  const router = useRouter();
   const [creditPacks, setCreditPacks] = useState<Plan[]>([]);
   const [selectedPack, setSelectedPack] = useState<string | undefined>(selectedPackId);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,6 +47,8 @@ export function CreditModal({
   const [userName, setUserName] = useState<string>("");
   const [userEmail, setUserEmail] = useState<string>("");
   const supabase = createSupabaseBrowserClient();
+  const toast = useToast();
+  // State for managing toast visibility - currently managed by toast component
 
   // Load credit packs and user information
   useEffect(() => {
@@ -110,37 +116,72 @@ export function CreditModal({
   
   const bestValuePack = getBestValuePack();
 
-  // Handle direct purchase with simplified approach
+  // Handle direct purchase with mobile redirect if needed
   const handleDirectPurchase = async (pack: Plan) => {
     try {
       console.log("Starting payment process for pack:", pack);
       setSelectedPack(pack.id);
       
-      // Create order on server
-      const orderResponse = await fetch('/api/payment/razorpay/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          packId: pack.id,
-          amount: pack.price,
-          planId: pack.id,
-          credits: pack.credits,
-          notes: {
-            userId: userId,
-            packName: pack.name,
-            credits: pack.credits,
-            packId: pack.id
-          }
-        }),
-      });
-
-      const orderData = await orderResponse.json();
+      // Check if on mobile device and redirect if needed
+      if (isMobileDevice()) {
+        console.log("Mobile device detected, redirecting to payment page");
+        // Redirect to dedicated payment page for mobile
+        router.push(`/payment?packId=${pack.id}&userId=${userId}`);
+        onClose(); // Close the modal since we're redirecting
+        return;
+      }
       
-      if (!orderData || !orderData.razorpayOrderId) {
-        console.error("Failed to create order:", orderData);
-        alert("Failed to create payment order. Please try again.");
+      // Create order on server
+      setIsLoading(true);
+      
+      let orderData;
+      try {
+        const orderResponse = await fetch('/api/payment/razorpay/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            packId: pack.id,
+            amount: pack.price,
+            planId: pack.id,
+            credits: pack.credits,
+            notes: {
+              userId: userId,
+              packName: pack.name,
+              credits: pack.credits,
+              packId: pack.id
+            }
+          }),
+        });
+
+        if (!orderResponse.ok) {
+          const errorData = await orderResponse.json();
+          console.error("Payment API error:", errorData);
+          
+          // Show appropriate error message based on response
+          if (errorData.message) {
+            toast.error("Payment Error", errorData.message);
+          } else {
+            toast.error("Payment Error", `Failed to create payment order (${orderResponse.status})`);
+          }
+          
+          setIsLoading(false);
+          return;
+        }
+
+        orderData = await orderResponse.json();
+        
+        if (!orderData || !orderData.razorpayOrderId) {
+          console.error("Failed to create order:", orderData);
+          toast.error("Payment Setup Failed", orderData.error || "Failed to create payment order. Please try again.");
+          setIsLoading(false);
+          return;
+        }
+      } catch (error) {
+        console.error("Payment initialization error:", error);
+        toast.error("Connection Error", "Could not connect to the payment service. Please check your internet connection and try again.");
+        setIsLoading(false);
         return;
       }
       
@@ -149,13 +190,13 @@ export function CreditModal({
       // Check if Razorpay is loaded
       if (!window.Razorpay) {
         console.error("Razorpay not loaded!");
-        alert("Payment gateway not available. Please refresh the page and try again.");
+        toast.error("Payment Error", "Payment gateway not available. Please refresh the page and try again.");
         return;
       }
       
       // Configure Razorpay options
       const options: RazorpayOptions = {
-        key: orderData.keyId || process.env.RAZORPAY_KEY_ID || "rzp_test_Y6gGTPKFwvRnJu",
+        key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_Y6gGTPKFwvRnJu",
         amount: orderData.amount,
         currency: orderData.currency || "INR",
         name: "Coder Duo",
@@ -177,32 +218,68 @@ export function CreditModal({
         handler: async function(response: RazorpaySuccessResponse) {
           console.log("Payment successful, verifying...", response);
           
-          // Verify payment
-          const verificationResponse = await fetch('/api/payment/razorpay/verify', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_signature: response.razorpay_signature,
-              packId: pack.id,
-              userId: userId,
-              credits: pack.credits
-            }),
-          });
-
-          const verificationData = await verificationResponse.json();
-          
-          if (verificationData.success) {
-            // Update the local state with new credits
-            if (onCreditsUpdated && verificationData.credits) {
-              onCreditsUpdated(verificationData.credits);
-            }
+          try {
+            setIsLoading(true);
             
-            // Close the modal
-            onClose();
+            // Verify payment
+            const verificationResponse = await fetch('/api/payment/razorpay/verify', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_signature: response.razorpay_signature,
+                packId: pack.id,
+                userId: userId,
+                credits: pack.credits
+              }),
+            });
+
+            // Parse verification response
+            const verificationData = await verificationResponse.json();
+            
+            if (verificationData.success) {
+              // Show success message
+              toast.success(
+                "Payment Successful",
+                `${pack.credits} credits have been added to your account!`
+              );
+              
+              // Update the local state with new credits
+              if (onCreditsUpdated && verificationData.credits) {
+                onCreditsUpdated(verificationData.credits);
+              }
+              
+              // Close the modal
+              onClose();
+            } else {
+              // Show error message - payment processed but verification failed
+              console.error("Payment verification failed:", verificationData);
+              toast.warning(
+                "Payment Received",
+                "Your payment was successful, but there was an issue updating your credits. Our team will review and update your account shortly."
+              );
+            }
+          } catch (error) {
+            console.error("Error in payment verification:", error);
+            toast.warning(
+              "Payment Verification Error", 
+              "Your payment may have been successful but we couldn't verify it. Please contact support if credits are not added."
+            );
+          } finally {
+            setIsLoading(false);
+            // Set processing pack ID back to null
+            setProcessingPackId(null);
+          }
+        },
+        modal: {
+          ondismiss: function() {
+            console.log("Payment modal dismissed");
+            toast.info("Payment Cancelled", "You have cancelled the payment process.");
+            setProcessingPackId(null);
+            setIsLoading(false);
           }
         }
       };
@@ -214,12 +291,14 @@ export function CreditModal({
         const razorpay = new window.Razorpay(options);
         razorpay.open();
       } else {
-        alert("Payment gateway not available. Please refresh the page and try again.");
+        toast.error("Payment Error", "Payment gateway not available. Please refresh the page and try again.");
       }
       
     } catch (error) {
       console.error("Error in handleDirectPurchase:", error);
-      alert("There was an error initiating the payment. Please try again.");
+      toast.error("Payment Error", "There was an error initiating the payment. Please try again.");
+      setProcessingPackId(null);
+      setIsLoading(false);
     }
   };
 
@@ -320,6 +399,10 @@ export function CreditModal({
           </ModalFooter>
         </>
       </ModalContent>
+      {/* Render the toast container here as well, to ensure it's visible */}
+      <toast.ToastContainer />
     </Modal>
   );
 }
+
+
