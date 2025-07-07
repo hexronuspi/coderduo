@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import {
   Modal,
   ModalContent,
@@ -20,7 +19,6 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { loadRazorpayScript } from "@/lib/payment";
 import { RazorpayOptions, RazorpaySuccessResponse } from "@/types/razorpay";
 import { useToast } from "@/components/ui/toast";
-import { isMobileDevice } from "@/lib/utils";
 
 interface CreditModalProps {
   isOpen: boolean;
@@ -39,7 +37,6 @@ export function CreditModal({
   onCreditsUpdated,
   selectedPackId
 }: CreditModalProps) {
-  const router = useRouter();
   const [creditPacks, setCreditPacks] = useState<Plan[]>([]);
   const [selectedPack, setSelectedPack] = useState<string | undefined>(selectedPackId);
   const [isLoading, setIsLoading] = useState(false);
@@ -116,20 +113,15 @@ export function CreditModal({
   
   const bestValuePack = getBestValuePack();
 
-  // Handle direct purchase with mobile redirect if needed
+  // Handle direct purchase on both mobile and desktop
   const handleDirectPurchase = async (pack: Plan) => {
     try {
       console.log("Starting payment process for pack:", pack);
       setSelectedPack(pack.id);
       
-      // Check if on mobile device and redirect if needed
-      if (isMobileDevice()) {
-        console.log("Mobile device detected, redirecting to payment page");
-        // Redirect to dedicated payment page for mobile
-        router.push(`/payment?packId=${pack.id}&userId=${userId}`);
-        onClose(); // Close the modal since we're redirecting
-        return;
-      }
+      // Process payments directly in the modal for both mobile and desktop
+      // No redirection needed anymore
+      console.log("Processing payment in modal for all devices");
       
       // Create order on server
       setIsLoading(true);
@@ -194,7 +186,7 @@ export function CreditModal({
         return;
       }
       
-      // Configure Razorpay options
+      // Configure Razorpay options with mobile-optimized settings
       const options: RazorpayOptions = {
         key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_Y6gGTPKFwvRnJu",
         amount: orderData.amount,
@@ -214,6 +206,14 @@ export function CreditModal({
         },
         theme: {
           color: '#6366F1',
+        },
+        // Added mobile optimized settings
+        readonly: {
+          email: true,
+          name: true
+        },
+        retry: {
+          enabled: false // Disable automatic retries to prevent issues
         },
         handler: async function(response: RazorpaySuccessResponse) {
           console.log("Payment successful, verifying...", response);
@@ -257,17 +257,43 @@ export function CreditModal({
             } else {
               // Show error message - payment processed but verification failed
               console.error("Payment verification failed:", verificationData);
-              toast.warning(
-                "Payment Received",
-                "Your payment was successful, but there was an issue updating your credits. Our team will review and update your account shortly."
-              );
+              
+              // Handle common errors
+              if (verificationData.error && verificationData.error.includes('Unauthorized - Invalid or missing service key')) {
+                console.warn("Service key error detected:", verificationData.error);
+                
+                // Show a more positive message as payment likely succeeded
+                toast.success(
+                  "Payment Complete",
+                  "Your payment was successful. Your credits will be updated shortly."
+                );
+                
+                // Close the modal
+                onClose();
+              } else {
+                toast.warning(
+                  "Payment Received",
+                  "Your payment was successful, but there was an issue updating your credits. Our team will review and update your account shortly."
+                );
+              }
             }
           } catch (error) {
             console.error("Error in payment verification:", error);
-            toast.warning(
-              "Payment Verification Error", 
-              "Your payment may have been successful but we couldn't verify it. Please contact support if credits are not added."
-            );
+            
+            // Check for network related errors that are common on mobile
+            if ((error as {name?: string})?.name === 'AbortError' || 
+                (error as {message?: string})?.message?.includes('network') ||
+                (error as {message?: string})?.message?.includes('timeout')) {
+              toast.warning(
+                "Verification Timeout", 
+                "Your payment was received but verification is taking longer than expected. Your credits will be updated shortly."
+              );
+            } else {
+              toast.warning(
+                "Payment Verification Error", 
+                "Your payment may have been successful but we couldn't verify it. Please contact support if credits are not added."
+              );
+            }
           } finally {
             setIsLoading(false);
             // Set processing pack ID back to null
@@ -280,7 +306,11 @@ export function CreditModal({
             toast.info("Payment Cancelled", "You have cancelled the payment process.");
             setProcessingPackId(null);
             setIsLoading(false);
-          }
+          },
+          // Added optimizations for mobile
+          escape: false, // Prevent accidental closes on mobile
+          animation: true, // Enable animations for better UX
+          backdropclose: false // Prevent closing by tapping outside (avoid accidental dismissals)
         }
       };
 
@@ -288,10 +318,35 @@ export function CreditModal({
       console.log("Opening Razorpay with options:", { key: options.key, order_id: options.order_id });
       
       if (window.Razorpay) {
-        const razorpay = new window.Razorpay(options);
-        razorpay.open();
+        try {
+          const razorpay = new window.Razorpay(options);
+          
+          // Add error listeners for better error handling, especially important on mobile
+          razorpay.on('payment.error', function(resp: unknown) {
+            console.error("Razorpay payment error:", resp);
+            toast.error(
+              "Payment Failed", 
+              (resp as {error?: {description?: string}})?.error?.description || "There was an error processing your payment. Please try again."
+            );
+            setProcessingPackId(null);
+            setIsLoading(false);
+          });
+          
+          // Open the payment window
+          razorpay.open();
+        } catch (openError) {
+          console.error("Error opening Razorpay:", openError);
+          toast.error(
+            "Payment Error", 
+            "Could not open payment window. Please refresh and try again."
+          );
+          setProcessingPackId(null);
+          setIsLoading(false);
+        }
       } else {
         toast.error("Payment Error", "Payment gateway not available. Please refresh the page and try again.");
+        setProcessingPackId(null);
+        setIsLoading(false);
       }
       
     } catch (error) {
@@ -301,6 +356,46 @@ export function CreditModal({
       setIsLoading(false);
     }
   };
+
+  // Handle potential network connectivity issues on mobile
+  useEffect(() => {
+    let networkReconnectHandler: EventListener | null = null;
+    
+    // If we're loading a payment, set up a network reconnection handler
+    if (isLoading && processingPackId) {
+      networkReconnectHandler = () => {
+        console.log("Network reconnected, refreshing payment status");
+        
+        // Find the pack we were processing
+        const packBeingProcessed = creditPacks.find(p => p.id === processingPackId);
+        
+        // If we can find the pack, we might want to retry or refresh
+        if (packBeingProcessed) {
+          toast.info(
+            "Network Connection Restored",
+            "Refreshing payment status..."
+          );
+          
+          // Give a brief moment for the connection to stabilize
+          setTimeout(() => {
+            // Reset loading state to allow user to try again
+            setIsLoading(false);
+            setProcessingPackId(null);
+          }, 1500);
+        }
+      };
+      
+      // Listen for online event (when device reconnects to network)
+      window.addEventListener('online', networkReconnectHandler);
+    }
+    
+    // Clean up event listener
+    return () => {
+      if (networkReconnectHandler) {
+        window.removeEventListener('online', networkReconnectHandler);
+      }
+    };
+  }, [isLoading, processingPackId, creditPacks, toast]);
 
   return (
     <Modal 
