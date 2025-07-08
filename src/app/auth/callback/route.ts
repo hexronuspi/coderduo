@@ -50,6 +50,42 @@ export async function GET(req: NextRequest) {
       throw new Error(error?.message || 'Failed to exchange code for session');
     }
     
+    // Get user ID from the session
+    const userId = data.session.user.id;
+    
+    // Record the login time in the users table
+    const currentTime = new Date().toISOString();
+    
+    // First, get the current login_times array
+    const { data: userData, error: fetchError } = await supabase
+      .from('users')
+      .select('login_times')
+      .eq('id', userId)
+      .single();
+      
+    if (fetchError) {
+      console.error('Failed to fetch current login times:', fetchError);
+    }
+    
+    // Prepare the updated login times array
+    const currentLoginTimes = userData?.login_times || [];
+    const updatedLoginTimes = [...currentLoginTimes, currentTime];
+    
+    // Update the login_times array in the user record
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        login_times: updatedLoginTimes
+      })
+      .eq('id', userId);
+      
+    if (updateError) {
+      console.error('Failed to update login time:', updateError);
+      // Continue with the flow even if updating login time fails
+    } else {
+      console.log('Login time recorded successfully');
+    }
+    
     // Log successful authentication
     console.log('Authentication successful');
     

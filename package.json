@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@headlessui/react": "^2.2.4",
     "@nextui-org/react": "^2.6.11",
     "@radix-ui/react-dialog": "^1.1.14",
@@ -26,6 +27,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.23.0",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^0.525.0",
     "next": "14.2.30",
     "next-auth": "^4.24.11",
@@ -35,6 +37,7 @@
     "react-scroll": "^1.9.3",
     "react-syntax-highlighter": "^15.6.1",
     "recharts": "^3.0.2",
+    "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.3.1"
   },

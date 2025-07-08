@@ -38,7 +38,6 @@ interface UserPlanHistoryItem {
   timestamp: string;
 }
 
-// Removed analytics data types
 
 // Filter options
 type FilterPeriod = 'all' | '7days' | '30days' | '90days';

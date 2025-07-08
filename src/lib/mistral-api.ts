@@ -237,6 +237,15 @@ This could be due to:
   }
 }
 
+// Helper function to format hints in a readable way
+function formatHints(hints: string[] | undefined): string {
+  if (!hints || !Array.isArray(hints) || hints.length === 0) {
+    return "No hints available";
+  }
+  
+  return hints.map((hint, index) => `Hint ${index + 1}: ${hint}`).join('\n');
+}
+
 // Custom hook to manage the chat state
 export function useMistralChat(questionTitle: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -297,28 +306,30 @@ export function useMistralChat(questionTitle: string) {
           const promptsData = JSON.parse(responseText);
           console.log('Prompt templates loaded:', Object.keys(promptsData));
           
-          // Check if we're analyzing code
+          // Handle question chat prompts
           if (promptType === 'codeAnalysis' && promptsData.codeAnalysis) {
             systemPrompt = promptsData.codeAnalysis
-              .replace('{title}', context.title)
-              .replace('{question}', context.question)
-              .replace('{hint}', context.hint ? context.hint.join('\n') : 'No hints available')
-              .replace('{solution}', context.solution || 'No solution available');
+              .replace(/{title}/g, context.title)
+              .replace(/{question}/g, context.question)
+              .replace(/{hint}/g, context.hint ? context.hint.join('\n') : 'No hints available')
+              .replace(/{solution}/g, context.solution || 'No solution available');
           } else if (messages.length > 0) {
             // Use the prompt with history
             systemPrompt = promptsData.questionChatWithHistory
-              .replace('{title}', context.title)
-              .replace('{question}', context.question)
-              .replace('{hint}', context.hint ? context.hint.join('\n') : 'No hints available')
-              .replace('{solution}', context.solution || 'No solution available')
-              .replace('{history}', historyString);
+              .replace(/{title}/g, context.title)
+              .replace(/{question}/g, context.question)
+              .replace(/{hint}/g, formatHints(context.hint))
+              .replace(/{solution}/g, context.solution || 'No solution available')
+              .replace(/{history}/g, historyString)
+              .replace(/{query}/g, userMessage);
           } else {
             // Use the prompt without history
             systemPrompt = promptsData.questionChat
-              .replace('{title}', context.title)
-              .replace('{question}', context.question)
-              .replace('{hint}', context.hint ? context.hint.join('\n') : 'No hints available')
-              .replace('{solution}', context.solution || 'No solution available');
+              .replace(/{title}/g, context.title)
+              .replace(/{question}/g, context.question)
+              .replace(/{hint}/g, formatHints(context.hint))
+              .replace(/{solution}/g, context.solution || 'No solution available')
+              .replace(/{query}/g, userMessage);
           }
         } catch (jsonError) {
           console.error('Error parsing prompt JSON:', jsonError, 'Raw content:', responseText);
@@ -485,5 +496,6 @@ export function useMistralChat(questionTitle: string) {
     busyKeyCount,
     sendMessage,
     clearChat,
+    setMessages,
   };
 }

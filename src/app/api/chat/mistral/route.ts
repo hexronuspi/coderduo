@@ -69,6 +69,7 @@ apiKeys.forEach((key, index) => {
   key.lastUsed = Date.now() - (index * 5000);
 });
 
+
 // Log API key info without revealing the full keys
 console.log(`Initialized ${apiKeys.length} Mistral API keys`);
 if (apiKeys.length > 0) {

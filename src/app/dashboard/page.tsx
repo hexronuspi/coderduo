@@ -4,11 +4,11 @@ import {
   Avatar, Chip, Modal, ModalContent, 
   ModalHeader, ModalBody, ModalFooter, Input, Dropdown, 
   DropdownTrigger, DropdownMenu, DropdownItem,
-  Tooltip
+  Tooltip, Tabs, Tab
 } from "@nextui-org/react";
 import { 
   LogOut, Code, List, Home,
-  BookOpen as BookIcon, Menu, ChevronDown,
+  BookOpen as Menu, ChevronDown,
   CreditCard, User, Plus,
   CreditCardIcon, History
 } from "lucide-react";
@@ -21,6 +21,9 @@ import { useRouter } from "next/navigation";
 import { CreditModal } from "@/components/credit/credit-modal";
 import { useToast } from "@/components/ui/toast";
 import UserHistoryView from "@/components/account/user-history";
+import LoginStreak from "@/components/account/login-streak";
+import QuestionUpload from "@/components/question-bank/question-upload";
+import MyQuestions from "@/components/question-bank/my-questions";
 
 // Question Bank Section component for the dashboard
 interface QuestionBankSectionProps {
@@ -51,6 +54,7 @@ export default function Dashboard() {
   const [selectedCreditPackId, setSelectedCreditPackId] = useState<string | null>(null);
   const [, setCreditPacks] = useState<Plan[]>([]);
   const [userId, setUserId] = useState<string>("");
+  const [loginTimes, setLoginTimes] = useState<string[]>([]);
   
   // Initialize the toast utilities
   const { success, ToastContainer } = useToast();
@@ -84,6 +88,7 @@ export default function Dashboard() {
           id: string;
           name?: string;
           credits?: number;
+          login_times?: string[];
           // add other fields as needed
         };
         const userData = data as UserProfile;
@@ -93,6 +98,25 @@ export default function Dashboard() {
         setIsFreeUser(userCredits <= 3); // Free users have 3 or fewer credits
         setCredits(userCredits);
         setDisplayName(userData.name || "Coder"); // Default name if not set
+        
+        // Get login times
+        const userLoginTimes = userData.login_times || [];
+        setLoginTimes(userLoginTimes);
+        
+        // If no login times recorded yet but user exists, add current login time
+        if (userLoginTimes.length === 0) {
+          const currentTime = new Date().toISOString();
+          // Add current time to login_times
+          await supabase
+            .from('users')
+            .update({
+              // Initialize with current login
+              login_times: [currentTime]
+            })
+            .eq('id', userId);
+            
+          setLoginTimes([currentTime]);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch user profile:", err);
@@ -302,14 +326,13 @@ export default function Dashboard() {
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-2">
               <h2 className="text-xl font-bold">Activity Overview</h2>
-              <p className="text-gray-500">Track your coding progress</p>
+              <p className="text-gray-500">Track your coding progress and login streak</p>
             </div>
-            
+            <LoginStreak loginTimes={loginTimes || []} userId={userId || ""}/>
             
             <div className="bg-gray-50 p-8 rounded-lg text-center mt-4">
-              <p className="text-gray-500">Start solving problems to see your activity here!</p>
+              <p className="text-gray-500">Start solving problems!</p>
               <Button 
-                color="primary" 
                 className="mt-4" 
                 onPress={() => setActiveTab("bank")}
               >
@@ -332,42 +355,61 @@ export default function Dashboard() {
         );
       case "problems":
         return (
-          <div className="text-center py-8">
-            <div className="max-w-md mx-auto">
-              <div className="rounded-full bg-primary-50 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                <Code size={24} className="text-primary-500" />
+          <div className="py-4">
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-2">
+                <h2 className="text-xl font-bold">My Practice Problems</h2>
+                <p className="text-gray-500">Create and manage your custom coding problems</p>
               </div>
-              <h3 className="text-xl font-bold mb-2">Practice Problems</h3>
-              <p className="text-gray-500 mb-6">
-                Personalized practice problems will appear here as you complete more challenges.
-              </p>
-              <Button 
-                color="primary" 
-                onPress={() => setActiveTab("bank")}
-              >
-                Start with Question Bank
-              </Button>
+              
+              <Tabs aria-label="Problem options">
+                <Tab key="create" title="Create New Problem">
+                  <div className="py-4">
+                    <QuestionUpload 
+                      supabase={supabase} 
+                      userId={userId} 
+                      currentCredits={credits} 
+                      onQuestionCreated={() => {
+                        // Update credits after question creation
+                        fetchUserProfile(userId);
+                      }}
+                      onBuyCredits={() => {
+                        // Open credit purchase modal
+                        setSelectedCreditPackId(null);
+                        openCreditModal();
+                      }}
+                    />
+                  </div>
+                </Tab>
+                <Tab key="my-problems" title="My Problems">
+                  <div className="py-4">
+                    {supabase && userId ? (
+                      <MyQuestions supabase={supabase} userId={userId} />
+                    ) : (
+                      <div className="py-8 text-center text-gray-500">
+                        <p>Unable to load your questions. Please sign in again.</p>
+                      </div>
+                    )}
+                  </div>
+                </Tab>
+              </Tabs>
             </div>
           </div>
         );
-      case "solutions":
+      case "upload":
         return (
-          <div className="text-center py-8">
-            <div className="max-w-md mx-auto">
-              <div className="rounded-full bg-primary-50 w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-                <BookIcon size={24} className="text-primary-500" />
-              </div>
-              <h3 className="text-xl font-bold mb-2">My Solutions</h3>
-              <p className="text-gray-500 mb-6">
-                Your solved problems and solutions will appear here.
-              </p>
-              <Button 
-                color="primary" 
-                onPress={() => setActiveTab("bank")}
-              >
-                Solve Your First Problem
-              </Button>
-            </div>
+          <div className="flex flex-col gap-4">
+            <QuestionUpload 
+              supabase={supabase} 
+              userId={userId} 
+              currentCredits={credits}
+              onQuestionCreated={() => fetchUserProfile(userId)} 
+              onBuyCredits={() => {
+                setSelectedCreditPackId(null);
+                openCreditModal();
+              }}
+            />
+            <MyQuestions supabase={supabase} userId={userId} />
           </div>
         );
       default:
@@ -403,15 +445,7 @@ export default function Dashboard() {
                 startContent={<Code size={18} />}
                 onPress={() => setActiveTab("problems")}
               >
-                Problems
-              </Button>
-              <Button
-                variant={activeTab === "solutions" ? "flat" : "light"}
-                className={`px-4 ${activeTab === "solutions" ? "bg-primary-50 text-primary-600" : ""}`}
-                startContent={<BookIcon size={18} />}
-                onPress={() => setActiveTab("solutions")}
-              >
-                My Solutions
+                My Problems
               </Button>
               <Button
                 variant={activeTab === "bank" ? "flat" : "light"}
@@ -655,18 +689,7 @@ export default function Dashboard() {
                 setMobileMenuOpen(false);
               }}
             >
-              Problems
-            </Button>
-            <Button
-              variant={activeTab === "solutions" ? "flat" : "light"}
-              className="justify-start"
-              startContent={<BookIcon size={18} />}
-              onPress={() => {
-                setActiveTab("solutions");
-                setMobileMenuOpen(false);
-              }}
-            >
-              My Solutions
+              My Problems
             </Button>
             <Button
               variant={activeTab === "bank" ? "flat" : "light"}

@@ -336,192 +336,266 @@ export function formatQuestionToHTML(formattedQuestion: FormattedQuestion): stri
  * @param solution The solution text/code
  * @returns A properly formatted solution object
  */
-export function formatSolution(solution: string): Record<string, unknown> {
+export function formatSolution(solution: unknown): Record<string, unknown> {
   try {
-    // If already a JSON, just return it
-    return JSON.parse(solution);
-  } catch (e) {
-    // Otherwise create a structured solution
-    console.log("Error", e)
-    // Detect language from code
-    const language = detectLanguage(solution);
+    // If it's a string, try to parse it as JSON
+    let solutionObj;
+    try {
+      solutionObj = typeof solution === 'string' ? JSON.parse(solution) : solution;
+    } catch (parseError) {
+      console.error('Error parsing solution JSON:', parseError);
+      throw new Error('Invalid solution format');
+    }
     
-    // Split solution into sections if any headers are found
-    const sections = extractSolutionSections(solution);
+    // Create a structured format following the requested organization:
+    // Theory, Brute Force, C++/Java/Python, Optimal, C++/Java/Python, Other, C++/Java/Python
+    const formatted: Record<string, unknown> = {};
+    let sectionIndex = 0; // For ordering sections
     
-    if (sections.length > 0) {
-      // Create a structured solution with sections
-      const formattedSolution: Record<string, unknown> = {};
-      
-      sections.forEach((section, index) => {
-        formattedSolution[`section${index + 1}`] = section;
-      });
-      
-      return formattedSolution;
-    } else {
-      // If no clear sections, create a basic structure
-      return {
-        section1: {
-          subsection: "Solution Approach",
-          text: extractExplanationText(solution),
-          code: extractCode(solution),
-          language
-        }
+    // 1. Problem Analysis - Add explanation as the first section if it exists
+    if (solutionObj.explanation) {
+      formatted[`section_${sectionIndex++}`] = {
+        sectionType: 'text',
+        subsection: "Problem Analysis",
+        text: solutionObj.explanation
       };
     }
-  }
-}
-
-/**
- * Extract sections from a solution text based on headers
- */
-function extractSolutionSections(solutionText: string): Array<{
-  subsection?: string;
-  text?: string;
-  code?: string;
-  language?: string;
-}> {
-  const sections: Array<{
-    subsection?: string;
-    text?: string;
-    code?: string;
-    language?: string;
-  }> = [];
-
-  // Pattern for section headers (## Header, # Header, or just Header:)
-  const headerPattern = /(^|\n)(#{1,3}|[A-Z][A-Za-z\s]+:)/g;
-  const matches: RegExpExecArray[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = headerPattern.exec(solutionText)) !== null) {
-    matches.push(match);
-  }
-  
-  if (matches.length === 0) {
-    // No headers found, treat as a single section
-    const code = extractCode(solutionText);
-    const text = extractExplanationText(solutionText);
-    const language = detectLanguage(code);
     
-    if (code || text) {
-      sections.push({
-        subsection: "Solution",
-        text: text || undefined,
-        code: code || undefined,
-        language: code ? language : undefined
-      });
+    // 2. Theory section - handle both direct string and object with concepts
+    if (solutionObj.theory) {
+      formatted[`section_${sectionIndex++}`] = {
+        sectionType: 'text',
+        subsection: "Theoretical Background",
+        text: typeof solutionObj.theory === 'string' 
+          ? solutionObj.theory 
+          : (solutionObj.theory.concepts ? solutionObj.theory.concepts : JSON.stringify(solutionObj.theory))
+      };
     }
     
-    return sections;
+    // 3. Brute Force section - handle both string and object format
+    if (solutionObj.bruteForce) {
+      // If bruteForce is an object with approach and complexity
+      if (typeof solutionObj.bruteForce === 'object') {
+        // Add approach
+        if (solutionObj.bruteForce.approach) {
+          formatted[`section_${sectionIndex++}`] = {
+            sectionType: 'text',
+            subsection: "Brute Force Approach",
+            text: solutionObj.bruteForce.approach
+          };
+        } else {
+          // If no approach property but bruteForce is an object, stringify it
+          formatted[`section_${sectionIndex++}`] = {
+            sectionType: 'text',
+            subsection: "Brute Force Approach",
+            text: JSON.stringify(solutionObj.bruteForce)
+          };
+        }
+        
+        // Add complexity if available
+        if (solutionObj.bruteForce.complexity) {
+          const complexityText = typeof solutionObj.bruteForce.complexity === 'string'
+            ? solutionObj.bruteForce.complexity
+            : `Time Complexity: ${solutionObj.bruteForce.complexity.time || 'Not specified'}\nSpace Complexity: ${solutionObj.bruteForce.complexity.space || 'Not specified'}`;
+            
+          formatted[`section_${sectionIndex++}`] = {
+            sectionType: 'text',
+            subsection: "Brute Force Complexity",
+            text: complexityText
+          };
+        }
+        
+        // Add brute force code implementations for C++/Java/Python if they exist inside bruteForce.code
+        if (solutionObj.bruteForce.code) {
+          // C++ implementation
+          if (solutionObj.bruteForce.code.cpp) {
+            formatted[`section_${sectionIndex++}`] = {
+              sectionType: 'code',
+              subsection: "C++ Brute Force Implementation",
+              code: solutionObj.bruteForce.code.cpp,
+              language: 'cpp'
+            };
+          }
+          
+          // Java implementation
+          if (solutionObj.bruteForce.code.java) {
+            formatted[`section_${sectionIndex++}`] = {
+              sectionType: 'code',
+              subsection: "Java Brute Force Implementation",
+              code: solutionObj.bruteForce.code.java,
+              language: 'java'
+            };
+          }
+          
+          // Python implementation
+          if (solutionObj.bruteForce.code.python) {
+            formatted[`section_${sectionIndex++}`] = {
+              sectionType: 'code',
+              subsection: "Python Brute Force Implementation",
+              code: solutionObj.bruteForce.code.python,
+              language: 'python'
+            };
+          }
+        }
+      } else {
+        // If bruteForce is just a string
+        formatted[`section_${sectionIndex++}`] = {
+          sectionType: 'text',
+          subsection: "Brute Force Approach",
+          text: solutionObj.bruteForce
+        };
+      }
+    }
+    
+    // 4. Optimal Solution section - handle both string and object format
+    if (solutionObj.optimal) {
+      // If optimal is an object with approach and complexity
+      if (typeof solutionObj.optimal === 'object') {
+        // Add approach
+        if (solutionObj.optimal.approach) {
+          formatted[`section_${sectionIndex++}`] = {
+            sectionType: 'text',
+            subsection: "Optimal Solution",
+            text: solutionObj.optimal.approach
+          };
+        } else {
+          // If no approach property but optimal is an object, stringify it
+          formatted[`section_${sectionIndex++}`] = {
+            sectionType: 'text',
+            subsection: "Optimal Solution",
+            text: JSON.stringify(solutionObj.optimal)
+          };
+        }
+        
+        // Add complexity if available
+        if (solutionObj.optimal.complexity) {
+          const complexityText = typeof solutionObj.optimal.complexity === 'string'
+            ? solutionObj.optimal.complexity
+            : `Time Complexity: ${solutionObj.optimal.complexity.time || 'Not specified'}\nSpace Complexity: ${solutionObj.optimal.complexity.space || 'Not specified'}`;
+            
+          formatted[`section_${sectionIndex++}`] = {
+            sectionType: 'text',
+            subsection: "Optimal Solution Complexity",
+            text: complexityText
+          };
+        }
+        
+        // Add optimal code implementations for C++/Java/Python if they exist inside optimal.code
+        if (solutionObj.optimal.code) {
+          // C++ implementation
+          if (solutionObj.optimal.code.cpp) {
+            formatted[`section_${sectionIndex++}`] = {
+              sectionType: 'code',
+              subsection: "C++ Optimal Implementation",
+              code: solutionObj.optimal.code.cpp,
+              language: 'cpp'
+            };
+          }
+          
+          // Java implementation
+          if (solutionObj.optimal.code.java) {
+            formatted[`section_${sectionIndex++}`] = {
+              sectionType: 'code',
+              subsection: "Java Optimal Implementation",
+              code: solutionObj.optimal.code.java,
+              language: 'java'
+            };
+          }
+          
+          // Python implementation
+          if (solutionObj.optimal.code.python) {
+            formatted[`section_${sectionIndex++}`] = {
+              sectionType: 'code',
+              subsection: "Python Optimal Implementation",
+              code: solutionObj.optimal.code.python,
+              language: 'python'
+            };
+          }
+        }
+      } else {
+        // If optimal is just a string
+        formatted[`section_${sectionIndex++}`] = {
+          sectionType: 'text',
+          subsection: "Optimal Solution",
+          text: solutionObj.optimal
+        };
+      }
+    }
+    
+    // 5. Code section if it exists at the top level (fall back for old format)
+    if (solutionObj.code && !solutionObj.bruteForce?.code && !solutionObj.optimal?.code) {
+      // C++ implementation
+      if (solutionObj.code.cpp) {
+        formatted[`section_${sectionIndex++}`] = {
+          sectionType: 'code',
+          subsection: "C++ Implementation",
+          code: solutionObj.code.cpp,
+          language: 'cpp'
+        };
+      }
+      
+      // Java implementation
+      if (solutionObj.code.java) {
+        formatted[`section_${sectionIndex++}`] = {
+          sectionType: 'code',
+          subsection: "Java Implementation",
+          code: solutionObj.code.java,
+          language: 'java'
+        };
+      }
+      
+      // Python implementation
+      if (solutionObj.code.python) {
+        formatted[`section_${sectionIndex++}`] = {
+          sectionType: 'code',
+          subsection: "Python Implementation",
+          code: solutionObj.code.python,
+          language: 'python'
+        };
+      }
+      
+      // JavaScript implementation (if present)
+      if (solutionObj.code.javascript) {
+        formatted[`section_${sectionIndex++}`] = {
+          sectionType: 'code',
+          subsection: "JavaScript Implementation",
+          code: solutionObj.code.javascript,
+          language: 'javascript'
+        };
+      }
+    }
+    
+    // 6. Handle complexity analysis separately if it exists at the top level
+    if (solutionObj.complexity && !solutionObj.bruteForce?.complexity && !solutionObj.optimal?.complexity) {
+      formatted[`section_${sectionIndex++}`] = {
+        sectionType: 'text',
+        subsection: "Complexity Analysis",
+        text: typeof solutionObj.complexity === 'string' 
+          ? solutionObj.complexity 
+          : `Time Complexity: ${solutionObj.complexity.time || 'Not specified'}\nSpace Complexity: ${solutionObj.complexity.space || 'Not specified'}`
+      };
+    }
+    
+    // If we have no sections, add a fallback error message
+    if (Object.keys(formatted).length === 0) {
+      formatted.section_0 = {
+        sectionType: 'text',
+        subsection: "Solution",
+        text: "No structured solution available. Try regenerating the solution."
+      };
+    }
+    
+    return formatted;
+  } catch (e) {
+    // If parsing fails, create a basic structure
+    console.error("Error formatting solution:", e);
+    return {
+      section_0: {
+        sectionType: 'text',
+        subsection: "Error",
+        text: "Could not parse solution. Please check the format or try regenerating it."
+      }
+    };
   }
-  
-  // Add indices to split on
-  const splitIndices = matches.map(match => match.index);
-  splitIndices.push(solutionText.length);
-  
-  // Split content based on header positions
-  for (let i = 0; i < matches.length; i++) {
-    const match = matches[i];
-    const startIndex = match.index!;
-    const endIndex = i < matches.length - 1 ? matches[i + 1].index! : solutionText.length;
-    
-    const sectionContent = solutionText.substring(startIndex, endIndex);
-    
-    // Get the subsection title by removing the markdown symbols
-    const subsectionTitle = match[0].replace(/^#+\s+/, '').replace(/:\s*$/, '').trim();
-    
-    // Extract text and code from this section
-    const sectionCode = extractCode(sectionContent);
-    const sectionText = extractExplanationText(sectionContent).replace(subsectionTitle, '').trim();
-    const language = detectLanguage(sectionCode);
-    
-    sections.push({
-      subsection: subsectionTitle,
-      text: sectionText || undefined,
-      code: sectionCode || undefined,
-      language: sectionCode ? language : undefined
-    });
-  }
-  
-  return sections;
 }
 
-/**
- * Extract code blocks from text
- */
-function extractCode(text: string): string {
-  // Look for code blocks with triple backticks
-  const codeBlockRegex = /```(?:\w+)?\n([\s\S]*?)```/g;
-  const codeBlocks: string[] = [];
-  let codeMatch: RegExpExecArray | null;
-  while ((codeMatch = codeBlockRegex.exec(text)) !== null) {
-    codeBlocks.push(codeMatch[1].trim());
-  }
-  
-  if (codeBlocks.length > 0) {
-    return codeBlocks.join('\n\n');
-  }
-  
-  // Check for code that's indented by at least 4 spaces or 1 tab
-  const indentedCodeRegex = /(^[ \t]{4,}[^\n]+\n?)+/gm;
-  const indentedBlocks: string[] = [];
-  const indentedMatches = Array.from(text.matchAll(indentedCodeRegex));
-  // matchAll returns an iterator, so we convert it to an array for compatibility
-  for (const match of indentedMatches) {
-    indentedBlocks.push(match[0].trim());
-  }
-  
-  if (indentedBlocks.length > 0) {
-    return indentedBlocks.join('\n\n');
-  }
-  
-  // Try to find code by looking for common programming patterns
-  const lines = text.split('\n');
-  const possibleCode = lines.filter(line => 
-    /[{}();=]/.test(line) || 
-    /\b(function|class|if|for|while|return|var|let|const|def|import|from)\b/.test(line)
-  ).join('\n');
-  
-  return possibleCode || '';
-}
-
-/**
- * Extract explanation text from a solution
- */
-function extractExplanationText(text: string): string {
-  // Remove code blocks
-  let cleanText = text.replace(/```(?:\w+)?\n[\s\S]*?```/g, '');
-  
-  // Remove indented code blocks
-  cleanText = cleanText.replace(/(^[ \t]{4,}[^\n]+\n?)+/gm, '');
-  
-  // Clean up the remaining text
-  return cleanText.trim();
-}
-
-/**
- * Detect programming language from code
- */
-function detectLanguage(code: string): string {
-  if (!code) return 'javascript'; // Default
-  
-  if (code.includes('func ') || code.includes('package main')) {
-    return 'go';
-  } else if (code.includes('public class') || code.includes('public static void main')) {
-    return 'java';
-  } else if (code.includes('def ') && code.includes(':')) {
-    return 'python';
-  } else if (code.includes('#include <') || code.includes('int main()')) {
-    return 'cpp';
-  } else if (code.includes('fn ') || code.includes('struct ') || code.includes('impl ')) {
-    return 'rust';
-  } else if (code.includes('<?php') || code.includes('namespace ')) {
-    return 'php';
-  } else if (code.includes('using System;') || code.includes('namespace ') || code.includes('public class')) {
-    return 'csharp';
-  } else if (code.includes('type ') && (code.includes('interface ') || code.includes('struct {'))) {
-    return 'typescript';
-  } else {
-    // Default to JavaScript if no clear indicators
-    return 'javascript';
-  }
-}
