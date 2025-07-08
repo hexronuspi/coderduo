@@ -31,6 +31,7 @@ export default function RootLayout({
     <html lang="en" className="scroll-smooth">
       <head>
         <script src="https://checkout.razorpay.com/v1/checkout.js" async defer></script>
+        <meta name="google-adsense-account" content="ca-pub-5779841991650029"/>
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
