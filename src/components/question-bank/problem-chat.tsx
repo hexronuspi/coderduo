@@ -510,12 +510,12 @@ export function ProblemChat({ question }: ProblemChatProps) {
           />
           <div className="flex items-center">
             <Button
-              color="primary"
+              color="secondary"
               isIconOnly
               isLoading={isLoading}
               isDisabled={!input.trim()}
               onPress={handleSendMessage}
-              className="h-full"
+              className="h-full bg-primary-600 text-white hover:bg-primary-700 focus:bg-primary-700"
               radius="md"
               size="lg"
             >
