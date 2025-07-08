@@ -395,21 +395,7 @@ export default function QuestionUpload({
                   {currentCredits < 1 ? "Need Credits" : "Upload Question"}
                 </Button>
               ) : (
-                <div className="flex gap-2">
-                  <Button
-                    color="default"
-                    variant="solid"
-                    onPress={() => {
-                      // Reset everything to start over
-                      setQuestionId(null);
-                      setProcessingStatus('idle');
-                      setStatusMessage('');
-                    }}
-                    className="font-medium"
-                  >
-                    Start Over
-                  </Button>
-                  
+                <div className="flex gap-2">                  
                   {currentCredits < 1 && (
                     <Button
                       color="warning"
