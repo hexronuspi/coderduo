@@ -10,6 +10,30 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      animation: {
+        aurora: "aurora 60s linear infinite",
+        "grid-pan": "grid-pan 60s linear infinite",
+        'shine': 'shine 2s linear infinite',
+        'subtle-glow': 'subtle-glow 4s ease-in-out infinite',
+      },
+      keyframes: {
+        'subtle-glow': {
+          '0%, 100%': { filter: 'drop-shadow(0 0 4px rgba(99, 102, 241, 0.3))' },
+          '50%': { filter: 'drop-shadow(0 0 8px rgba(99, 102, 241, 0.7))' },
+        },
+        shine: {
+          '0%': { backgroundPosition: '200% 0' },
+          '100%': { backgroundPosition: '-200% 0' },
+        },
+        aurora: {
+          from: { backgroundPosition: "0% 50%" },
+          to: { backgroundPosition: "200% 50%" },
+        },
+        "grid-pan": {
+          "0%": { backgroundPosition: "0% 0%" },
+          "100%": { backgroundPosition: "24px -24px" },
+        },
+      },
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",

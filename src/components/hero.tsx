@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Card, CardBody, CardFooter, CardHeader, Chip, Divider, ButtonGroup, Tooltip } from "@nextui-org/react";
-import {  Lightbulb, Shuffle, Brain, MessageCircle, ChevronRight,  CheckCircle2, Copy } from "lucide-react";
+import {  Lightbulb, Shuffle, Brain, ChevronRight,  CheckCircle2, Copy } from "lucide-react";
 import { useState } from "react";
 
 export function Hero() {
@@ -60,9 +60,9 @@ export function Hero() {
                 
                 <div className="flex flex-wrap gap-3 mb-6">
                   <Button
-                    color="primary"
-                    variant={showHint ? "solid" : "light"}
-                    startContent={<Lightbulb size={18} />}
+                    color="success"
+                    variant={showSolution ? "solid" : "light"}
+                    startContent={<CheckCircle2 size={18} />}
                     onClick={() => {
                       setShowHint(!showHint);
                       setShowSolution(false);
@@ -84,9 +84,9 @@ export function Hero() {
                     {showSolution ? "Hide Solution" : "Show Solution"}
                   </Button>
                   <Button
-                    color="secondary"
-                    variant={showChat ? "solid" : "light"}
-                    startContent={<MessageCircle size={18} />}
+                    color="success"
+                    variant={showSolution ? "solid" : "light"}
+                    startContent={<CheckCircle2 size={18} />}
                     onClick={() => {
                       setShowChat(!showChat);
                       setShowHint(false);
