@@ -414,7 +414,7 @@ export function CreditModal({
             </p>
           </ModalHeader>
           <Divider />
-          <ModalBody className="py-6">
+          <ModalBody>
             {isLoading ? (
               <div className="flex justify-center items-center h-40">
                 <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary-500"></div>

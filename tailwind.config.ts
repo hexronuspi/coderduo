@@ -15,6 +15,8 @@ const config: Config = {
         "grid-pan": "grid-pan 60s linear infinite",
         'shine': 'shine 2s linear infinite',
         'subtle-glow': 'subtle-glow 4s ease-in-out infinite',
+        'pulse-slow': 'pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'pulse-slower': 'pulse 8s cubic-bezier(0.4, 0, 0.6, 1) infinite'
       },
       keyframes: {
         'subtle-glow': {

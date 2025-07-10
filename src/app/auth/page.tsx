@@ -12,9 +12,11 @@ import { ThemeSupa } from '@supabase/auth-ui-shared';
 // AuthContent component uses searchParams and needs to be wrapped in Suspense
 function AuthContent() {
   const [error, setError] = useState<string | null>(null);
+  // State to hold the redirect URL, which can only be constructed on the client
+  const [redirectUrl, setRedirectUrl] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
-  
+
   // Memoize the Supabase client to avoid re-creating it on every render
   const supabase = useMemo(() => {
     try {
@@ -26,18 +28,26 @@ function AuthContent() {
     }
   }, []);
 
+  // useEffect to construct the redirect URL once the component mounts on the client
+  useEffect(() => {
+    // This code runs only in the browser, where `window` is available.
+    const redirectToParam = searchParams.get("redirectTo") || "/dashboard";
+    const url = `${window.location.origin}/auth/callback?redirectTo=${encodeURIComponent(redirectToParam)}`;
+    setRedirectUrl(url);
+  }, [searchParams]);
+
   useEffect(() => {
     if (!supabase) return;
 
     // Check for error in URL params
-    const errorParam = searchParams.get("error");
+    const errorParam = searchParams.get("error_description"); // Supabase often uses error_description
     if (errorParam) {
-      setError(`Authentication error: ${errorParam}`);
+      setError(`Authentication error: ${errorParam.replace(/\+/g, ' ')}`);
     }
 
     // Get redirectTo parameter (where to send user after successful login)
     const redirectTo = searchParams.get("redirectTo") || '/dashboard';
-    
+
     // Set up auth state change listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
@@ -56,7 +66,7 @@ function AuthContent() {
         router.push('/dashboard');
       }
     };
-    
+
     checkUser();
 
     // Clean up subscription
@@ -91,43 +101,32 @@ function AuthContent() {
               </div>
             )}
             
-            {supabase && (
+            {/* Conditionally render Auth only when supabase and redirectUrl are ready */}
+            {supabase && redirectUrl && (
               <Auth
                 supabaseClient={supabase}
                 appearance={{
                   theme: ThemeSupa,
                   style: {
-                    button: {
-                      borderRadius: '8px',
-                      fontSize: '16px',
-                      padding: '10px 15px',
-                    },
-                    input: {
-                      borderRadius: '8px',
-                    },
-                    container: {
-                      maxWidth: '100%',
-                    },
+                    button: { borderRadius: '8px', fontSize: '16px', padding: '10px 15px' },
+                    input: { borderRadius: '8px' },
+                    container: { maxWidth: '100%' },
                   },
                   variables: {
                     default: {
-                      colors: {
-                        brand: '#3B82F6',
-                        brandAccent: '#2563EB',
-                      },
+                      colors: { brand: '#3B82F6', brandAccent: '#2563EB' },
                     },
                   },
                 }}
                 providers={['google']}
-                redirectTo={`${window.location.origin}/auth/callback?redirectTo=${
-                  encodeURIComponent(searchParams.get("redirectTo") || "/dashboard")
-                }`}
+                // Use the state variable for the redirectTo prop
+                redirectTo={redirectUrl}
                 onlyThirdPartyProviders={true}
               />
             )}
             
             <p className="text-xs text-center text-gray-500 mt-8">
-              By continuing, you agree to Coder Duo`&apos;s Terms of Service and Privacy Policy.
+              By continuing, you agree to Coder Duo&apos;s Terms of Service and Privacy Policy.
             </p>
           </CardBody>
           
@@ -142,7 +141,7 @@ function AuthContent() {
   );
 }
 
-// Add this export default function that wraps AuthContent in Suspense
+// The wrapper component remains the same and is correct.
 export default function AuthPage() {
   return (
     <Suspense fallback={
