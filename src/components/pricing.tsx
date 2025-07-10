@@ -115,11 +115,6 @@ export function Pricing() {
                   ))}
                 </ul>
               </CardBody>
-              <CardFooter className="p-6">
-                <Button fullWidth size="lg" variant="ghost" className="font-semibold text-primary-600">
-                  Get Started Free
-                </Button>
-              </CardFooter>
             </Card>
           </div>
         )}
@@ -181,14 +176,6 @@ export function Pricing() {
                       </ul>
                     </CardBody>
                     <CardFooter className="p-6">
-                      <Button 
-                        fullWidth 
-                        size="lg" 
-                        className={`font-semibold ${isBestValue ? "bg-primary-600 text-white shadow-lg" : "bg-slate-800 text-white hover:bg-slate-900"}`}
-                        endContent={<ArrowRight className="w-4 h-4" />}
-                      >
-                        Buy Credits
-                      </Button>
                     </CardFooter>
                   </Card>
                 </div>
