@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Button, Card, CardHeader, CardBody, CardFooter, Chip, Divider } from "@nextui-org/react";
-import { Zap, CheckCircle, ArrowRight } from "lucide-react";
+import {  Card, CardHeader, CardBody, CardFooter, Chip, Divider } from "@nextui-org/react";
+import { Zap, CheckCircle } from "lucide-react";
 import { fetchPlans } from "@/lib/subscription";
 import { Plan } from "@/types/subscription";
 
