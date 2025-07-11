@@ -170,9 +170,9 @@ export default function LoginStreak({ loginTimes }: LoginStreakProps) {
   const weekdayLabels = useMemo(() => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], []);
 
   return (
-    <Card className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-2xl border border-slate-200 dark:border-zinc-800 shadow-lg shadow-slate-300/20 dark:shadow-black/20 p-2 sm:p-4 overflow-hidden relative">
+    <Card className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-2xl border border-slate-200 dark:border-zinc-800 shadow-lg shadow-slate-300/20 dark:shadow-black/20 overflow-hidden relative">
       {/* Subtle background pattern */}
-      <div className="absolute inset-0 -z-10 bg-[url('/grid.svg')] bg-repeat [mask-image:linear-gradient(to_bottom,white_50%,transparent_100%)] dark:invert"></div>
+    <div className="absolute inset-0 -z-10 bg-repeat [mask-image:linear-gradient(to_bottom,white_50%,transparent_100%)] dark:invert"></div>
       
       <CardHeader className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 z-10 p-2">
         <h3 className="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100 tracking-tight">
@@ -208,7 +208,7 @@ export default function LoginStreak({ loginTimes }: LoginStreakProps) {
             size="sm"
             selectedKeys={[selectedYear]}
             onChange={(e) => e.target.value && setSelectedYear(e.target.value)}
-            className="w-28"
+            className="w-32"
             classNames={{
               trigger: "bg-white/70 dark:bg-zinc-800 border border-slate-300/70 dark:border-zinc-700 text-slate-800 dark:text-slate-100 data-[hover=true]:bg-slate-100 dark:data-[hover=true]:bg-zinc-700 shadow-sm",
               popoverContent: "bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl border border-slate-200/80 dark:border-zinc-700 text-slate-800 dark:text-slate-100",

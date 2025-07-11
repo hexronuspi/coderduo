@@ -2,18 +2,34 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { 
-  Card, 
-  CardBody, 
-  Button, 
-  Chip, 
-  Spinner,
   Pagination,
-  Input
+  Input,
+  Skeleton,
+  Button,
+  Chip,
+  Tooltip
 } from "@nextui-org/react";
-import { Search, ArrowRight, Clock, AlertCircle } from 'lucide-react';
+import { 
+  Search, 
+  AlertTriangle, 
+  Inbox, 
+  ArrowRight, 
+  ArrowDownNarrowWide, 
+  ArrowUpNarrowWide 
+} from 'lucide-react';
 import { TypedSupabaseClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// Debounce hook for efficient searching
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+  useEffect(() => {
+    const handler = setTimeout(() => { setDebouncedValue(value); }, delay);
+    return () => { clearTimeout(handler); };
+  }, [value, delay]);
+  return debouncedValue;
+}
 
 interface UserQuestion {
   id: string;
@@ -28,252 +44,198 @@ interface UserQuestion {
 interface MyQuestionsProps {
   supabase: TypedSupabaseClient;
   userId: string;
-  onRefresh?: () => void; // Optional callback to refresh parent data
+  /**
+   * Optional callback, likely for the parent component to refresh its own data
+   * (e.g., user credits) after an action occurs within this component.
+   * Added to resolve TypeScript errors from the parent.
+   */
+  onRefresh?: () => void;
+  onProblemClick?: (title: string, id: string) => void;
 }
 
-export default function MyQuestions({ supabase, userId, onRefresh }: MyQuestionsProps) {
+export default function MyQuestions({ supabase, userId, onProblemClick }: MyQuestionsProps) {
   const [questions, setQuestions] = useState<UserQuestion[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [status, setStatus] = useState<'loading' | 'error' | 'success'>('loading');
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [totalQuestions, setTotalQuestions] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isSearching, setIsSearching] = useState(false);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc'); // 'desc' for newest first
   
   const router = useRouter();
   const questionsPerPage = 10;
-  
-  // Fetch user's questions
-  const fetchQuestions = useCallback(
-    async (query = "", pageNum = 1) => {
-      try {
-        setIsLoading(true);
-        
-        // Build the query
-        let supaQuery = supabase
-          .from('questions_user')
-          .select('*', { count: 'exact' })
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false });
-        
-        // Add search filter if provided
-        if (query) {
-          supaQuery = supaQuery.ilike('title', `%${query}%`);
-        }
-        
-        // Add pagination
-        const from = (pageNum - 1) * questionsPerPage;
-        const to = from + questionsPerPage - 1;
-        
-        // Execute query
-        const { data, error, count } = await supaQuery
-          .range(from, to);
-        
-        if (error) {
-          console.error('Error fetching questions:', error);
-          return;
-        }
-        
-        setQuestions(data || []);
-        if (count !== null) {
-          setTotalPages(Math.ceil(count / questionsPerPage));
-        }
-        
-        // Trigger parent refresh callback if provided
-        if (onRefresh) {
-          onRefresh();
-        }
-      } catch (err) {
-        console.error('Failed to fetch questions:', err);
-      } finally {
-        setIsLoading(false);
-        setIsSearching(false);
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
+  const totalPages = Math.ceil(totalQuestions / questionsPerPage);
+
+  const fetchQuestions = useCallback(async () => {
+    setStatus('loading');
+    try {
+      let query = supabase
+        .from('questions_user')
+        .select('*', { count: 'exact' })
+        .eq('user_id', userId)
+        .order('created_at', { ascending: sortOrder === 'asc' });
+
+      if (debouncedSearchQuery) {
+        query = query.ilike('title', `%${debouncedSearchQuery}%`);
       }
-    },
-    [supabase, userId, onRefresh, questionsPerPage]
-  );
+
+      const from = (page - 1) * questionsPerPage;
+      const to = from + questionsPerPage - 1;
+      
+      const { data, error, count } = await query.range(from, to);
+
+      if (error) throw error;
+      
+      setQuestions(data || []);
+      setTotalQuestions(count || 0);
+      setStatus('success');
+    } catch (err) {
+      console.error('Failed to fetch questions:', err);
+      setStatus('error');
+    }
+  }, [supabase, userId, page, debouncedSearchQuery, sortOrder]);
+
+  useEffect(() => { fetchQuestions(); }, [fetchQuestions]);
+  // Reset to page 1 on new search, but prevent an infinite loop by checking if page is already 1
+  useEffect(() => { if (debouncedSearchQuery && page !== 1) setPage(1); }, [debouncedSearchQuery, page]);
   
-  // Initial fetch and subscription
   useEffect(() => {
-    fetchQuestions("", page);
-    
-    // Set up a subscription for real-time updates
-    const subscription = supabase
-      .channel('questions_user_changes')
+    const channel = supabase
+      .channel(`questions_user_changes_${userId}`)
       .on(
         'postgres_changes',
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'questions_user',
-          filter: `user_id=eq.${userId}`
-        },
-        () => {
-          fetchQuestions(searchQuery, page);
-        }
+        { event: '*', schema: 'public', table: 'questions_user', filter: `user_id=eq.${userId}` },
+        () => fetchQuestions()
       )
       .subscribe();
-      
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [userId, fetchQuestions, page, searchQuery, supabase]);
+    return () => { supabase.removeChannel(channel); };
+  }, [supabase, userId, fetchQuestions]);
   
-  // Handle page changes
-  useEffect(() => {
-    fetchQuestions(searchQuery, page);
-  }, [page, fetchQuestions, searchQuery]);
-  
-  // Handle search
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSearching(true);
-    setPage(1); // Reset to first page when searching
-    fetchQuestions(searchQuery, 1);
+  const toggleSortOrder = () => {
+    setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
   };
-  
-  // View question details
-  const viewQuestion = (title: string, id: string) => {
-    router.push(`/dashboard/problems/${encodeURIComponent(title)}?id=${id}`);
+
+  const viewQuestion = (id: string, title?: string) => {
+    if (onProblemClick && questions) {
+      const q = questions.find(q => q.id === id);
+      if (q) {
+        onProblemClick(q.title, q.id);
+        return;
+      }
+    }
+    router.push(`/dashboard/problems/${encodeURIComponent(title ?? "")}?id=${id}`);
   };
-  
-  // Format date for display
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
-  };
-  
-  return (
-    <div className="w-full">
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-violet-600">
-              My Problems
-            </h2>
-            <p className="text-gray-600">
-              Your collection of {questions.length} practice problems
-            </p>
+  const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const truncateText = (text: string, maxLength: number) => text.length <= maxLength ? text : text.slice(0, maxLength) + '...';
+
+  const renderSkeleton = () => (
+    <div className="divide-y divide-slate-200 dark:divide-slate-800">
+      {Array.from({ length: 8 }).map((_, index) => (
+        <div key={index} className="flex items-center gap-4 p-4 h-[78px]">
+          <Skeleton className="w-12 h-5 rounded-md flex-shrink-0" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-5 w-3/5 rounded-md" />
+            <div className="flex gap-2">
+              <Skeleton className="h-5 w-20 rounded-md" />
+              <Skeleton className="h-5 w-24 rounded-md" />
+            </div>
           </div>
-          
-          <form onSubmit={handleSearch} className="flex gap-2 w-full md:w-auto">
-            <Input
-              placeholder="Search by title..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              startContent={<Search size={18} className="text-blue-500" />}
-              size="lg"
-              className="w-full max-w-md"
-              classNames={{
-                input: "bg-transparent",
-                inputWrapper: "bg-white shadow-md hover:shadow-lg transition-shadow"
-              }}
-            />
-            <Button
-              size="lg"
-              type="submit"
-              isLoading={isSearching}
-              color="primary"
-              className="font-medium"
-              startContent={!isSearching && <Search size={18} />}
-            >
-              Search
-            </Button>
-          </form>
+          <Skeleton className="h-5 w-32 rounded-md hidden sm:block flex-shrink-0" />
+          <Skeleton className="h-9 w-24 rounded-lg flex-shrink-0" />
+        </div>
+      ))}
+    </div>
+  );
+  
+  const renderEmptyOrErrorState = (isError: boolean) => (
+     <div className="flex flex-col items-center justify-center text-center py-20 px-6 min-h-[400px]">
+      <div className="flex justify-center items-center mx-auto w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full">
+         {isError ? <AlertTriangle size={32} className="text-red-500"/> : (searchQuery ? <Search size={32} className="text-slate-500" /> : <Inbox size={32} className="text-slate-500" />)}
+      </div>
+      <h3 className="mt-4 text-lg font-semibold text-slate-800 dark:text-slate-200">{isError ? "Something Went Wrong" : (searchQuery ? "No Problems Found" : "Your Problem List is Empty")}</h3>
+      <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 max-w-sm">{isError ? "We couldn't load your problems. Please try refreshing." : (searchQuery ? "Try a different search term." : "Create your first problem to get started.")}</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Header section remains the same */}
+      <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">My Problems</h1>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">A centralized hub for all your created practice problems.</p>
+        </div>
+        <Input isClearable placeholder="Search by title..." value={searchQuery} onValueChange={setSearchQuery} onClear={() => setSearchQuery("")} startContent={<Search size={18} className="text-slate-400 dark:text-slate-500 pointer-events-none" />} className="w-full md:w-72" classNames={{ input: "text-slate-800 dark:text-slate-200", inputWrapper: "bg-white dark:bg-slate-900 border border-slate-300/70 dark:border-slate-700/70 shadow-sm"}} />
+      </header>
+      
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-x-auto">
+        {/* Table Header */}
+        <div className="flex items-center gap-x-4 p-4 bg-slate-50 dark:bg-slate-800/50 text-xs font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wider min-w-[600px]">
+            <div className="w-12 flex-shrink-0 text-center">#</div>
+            <div className="flex-1">Title</div>
+            <div className="w-32 flex-shrink-0 text-left hidden sm:flex items-center gap-1">
+              <span>Created On</span>
+              <Tooltip content={`Sort by Date (${sortOrder === 'asc' ? 'Oldest First' : 'Newest First'})`} placement="top" delay={300}>
+                <Button isIconOnly size="sm" variant="light" onPress={toggleSortOrder} className="text-slate-500 dark:text-slate-400">
+                  {sortOrder === 'asc' ? <ArrowUpNarrowWide size={16} /> : <ArrowDownNarrowWide size={16} />}
+                </Button>
+              </Tooltip>
+            </div>
+            <div className="w-24 flex-shrink-0 text-center">Action</div>
         </div>
         
-        {isLoading ? (
-          <div className="flex justify-center py-12">
-            <Spinner size="lg" color="primary" />
-          </div>
-        ) : questions.length === 0 ? (
-          <div className="text-center py-12 border border-gray-200 rounded-lg bg-gray-50">
-            <div className="mb-4">
-              <AlertCircle size={40} className="mx-auto text-gray-400" />
-            </div>
-            <p className="text-gray-500 mb-2">No questions found</p>
-            <p className="text-sm text-gray-400">
-              {searchQuery ? "Try a different search term" : "Create your first question to get started"}
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {questions.map((question, index) => (
-                <motion.div
-                  key={question.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: index * 0.05 }}
-                >
-                  <Card 
-                    className="border-none shadow-sm hover:shadow-md transition-all hover:bg-blue-50/30 w-full"
-                    isPressable
-                    onPress={() => viewQuestion(question.title, question.id)}
-                  >
-                    <CardBody className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 gap-2">
-                      <div className="flex flex-col gap-1 w-full sm:w-auto">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-gray-500 mr-1">{(page - 1) * questionsPerPage + index + 1}.</span>
-                          <h3 className="text-md font-semibold">{question.title}</h3>
+        <div className="min-h-[500px]">
+          {status === 'loading' && renderSkeleton()}
+          {status === 'error' && renderEmptyOrErrorState(true)}
+          {status === 'success' && (
+            questions.length === 0 ? renderEmptyOrErrorState(false) : (
+              <div className="divide-y divide-slate-200 dark:divide-slate-800 min-w-[600px]">
+                <AnimatePresence>
+                  {questions.map((q, index) => (
+                    <motion.div key={q.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+                      <div className="group flex items-center gap-x-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                        {/* Number Column */}
+                        <div className="w-12 flex-shrink-0 text-center font-medium text-slate-500 dark:text-slate-400">
+                          {(page - 1) * questionsPerPage + index + 1}
                         </div>
 
-                        <div className="flex gap-2 items-center text-xs text-gray-500">
-                          <Clock size={14} />
-                          <span>{formatDate(question.created_at)}</span>
-                        </div>
-                        
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          <Chip 
-                            size="sm" 
-                            color={question.solution ? "success" : "warning"}
-                            variant="flat"
-                            className="uppercase text-xs font-bold"
-                          >
-                            {question.solution ? "Solution Ready" : "Processing"}
-                          </Chip>
-                          
-                          {question.hint && question.hint.length > 0 && (
-                            <Chip 
-                              size="sm" 
-                              variant="flat" 
-                              color="primary"
-                              className="text-xs"
-                            >
-                              {question.hint.length} Hints
-                            </Chip>
+                        {/* Title and Hints Column */}
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-slate-800 dark:text-slate-200 truncate group-hover:text-blue-600 transition-colors">{q.title}</h3>
+                          {q.hint?.length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap gap-2 items-center">
+                              {q.hint.slice(0, 3).map((hint, i) => (
+                                <Chip key={i} size="sm" variant="flat" color="default">{truncateText(hint, 20)}</Chip>
+                              ))}
+                            </div>
                           )}
                         </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-3 sm:ml-auto mt-2 sm:mt-0">
-                        <div
-                          className="flex items-center gap-1 bg-primary-100 text-primary-600 hover:bg-primary-200 px-3 py-1.5 rounded-md text-sm cursor-pointer transition-colors"
-                        >
-                          <span>Solve</span>
-                          <ArrowRight size={16} />
+                        
+                        {/* Date Column */}
+                        <div className="w-32 flex-shrink-0 text-left hidden sm:block">
+                          <p className="text-sm font-medium text-slate-900 dark:text-slate-200">{formatDate(q.created_at)}</p>
+                        </div>
+
+                        {/* Action Button */}
+                        <div className="w-24 flex-shrink-0 text-center">
+                          <Button size="sm" variant="flat" color="primary" onPress={() => viewQuestion(q.id, q.title)} endContent={<ArrowRight size={14} />}>Solve</Button>
                         </div>
                       </div>
-                    </CardBody>
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
-            
-            {totalPages > 1 && (
-              <div className="flex justify-center mt-6">
-                <Pagination
-                  total={totalPages}
-                  initialPage={page}
-                  onChange={setPage}
-                  showControls
-                />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
               </div>
-            )}
-          </>
+            )
+          )}
+        </div>
+        
+        {totalPages > 1 && status === 'success' && (
+          <div className="flex items-center justify-between p-4 border-t border-slate-200 dark:border-slate-800">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Page <span className="font-semibold text-slate-800 dark:text-slate-200">{page}</span> of <span className="font-semibold text-slate-800 dark:text-slate-200">{totalPages}</span>
+            </p>
+            <Pagination isCompact showControls total={totalPages} page={page} onChange={setPage} />
+          </div>
         )}
       </div>
     </div>

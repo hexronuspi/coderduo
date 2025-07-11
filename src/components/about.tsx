@@ -84,6 +84,7 @@ const InteractiveBackground = ({ mousePosition }: { mousePosition: { x: number; 
         const acceleration = (springForce + dampingForce) / this.mass;
         this.radiusVelocity += acceleration;
         this.radius += this.radiusVelocity;
+        if (this.radius < 0.1) this.radius = 0.1;
 
         this.x += this.vx;
         this.y += this.vy;

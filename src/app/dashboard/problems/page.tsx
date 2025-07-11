@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Tabs, Tab, Card, CardBody } from "@nextui-org/react";
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -10,6 +11,7 @@ import QuestionUpload from '@/components/question-bank/question-upload';
 import ProblemNavbar from '@/components/question-bank/problem-navbar';
 
 export default function ProblemsPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState("my-problems");
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -71,6 +73,10 @@ export default function ProblemsPage() {
     getUserData();
   }, []);
   
+  function handleProblemClick(title: string, id: string): void {
+    router.push(`/dashboard/problems/${encodeURIComponent(title)}?id=${id}`);
+  }
+
   return (
     <>
       <ProblemNavbar />
@@ -118,6 +124,7 @@ export default function ProblemsPage() {
           onRefresh={() => {
             if (userId) fetchUserCredits(userId);
           }}
+          onProblemClick={handleProblemClick}
         />
         )}
         
