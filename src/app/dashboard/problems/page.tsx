@@ -7,7 +7,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 // UI & Animation Libraries
 import { Tabs, Tab } from "@nextui-org/react";
 import { AnimatePresence, motion } from 'framer-motion';
-import { List, UploadCloud, Gem } from 'lucide-react'; // Modern, clean icons
+import { List, UploadCloud } from 'lucide-react'; // Modern, clean icons
 
 // Supabase & Component Imports
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -107,21 +107,6 @@ export default function ProblemsPage() {
                 Create, manage, and master your personal collection of problems.
               </p>
             </div>
-            
-            <motion.div 
-              whileHover={{ scale: 1.03 }}
-              className="flex items-center gap-4 bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700/50 rounded-xl p-4 shadow-sm hover:shadow-lg transition-shadow duration-300 self-start md:self-center cursor-pointer"
-              title="Click to refresh credits"
-              onClick={() => userId && fetchUserCredits(userId)} // UX improvement: refresh on click
-            >
-              <div className="bg-primary-50 dark:bg-primary-500/10 p-3 rounded-lg">
-                <Gem className="w-6 h-6 text-primary-500 dark:text-primary-400" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Available Credits</p>
-                <p className="text-3xl font-bold text-slate-800 dark:text-slate-100 tracking-tight">{userCredits}</p>
-              </div>
-            </motion.div>
           </motion.header>
 
           {/* --- Tab Navigation --- */}
