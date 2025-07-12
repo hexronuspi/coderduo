@@ -108,7 +108,8 @@ export function QuestionChat({ question }: QuestionChatProps) {
       {/* Chat Messages */}
       <div 
         ref={chatContainerRef} 
-        className="flex-grow overflow-y-auto mb-4 p-2 space-y-4 rounded-lg bg-gray-50 dark:bg-gray-900/50"
+        // MODIFICATION: Added `min-h-0` to prevent the flex container from growing and enforce scrolling.
+        className="flex-grow min-h-0 overflow-y-auto mb-4 p-2 space-y-4 rounded-lg bg-gray-50 dark:bg-gray-900/50"
       >
         {/* Welcome Message */}
         {messages.length === 0 && (
@@ -230,7 +231,7 @@ export function QuestionChat({ question }: QuestionChatProps) {
                     size="sm"
                     color="danger"
                     variant="light"
-                    onPress={() => clearChat()} // Clear the chat instead of trying to set error to null
+                    onPress={() => clearChat()}
                   >
                     Dismiss
                   </Button>
@@ -354,7 +355,13 @@ function ChatMessageItem({ message }: { message: ChatMessage }) {
             : "bg-primary-100 text-primary-500 dark:bg-primary-900/50",
         }}
       />
-      <div className="prose prose-sm dark:prose-invert max-w-none flex-grow overflow-auto">
+      {/* 
+        MODIFICATION: Removed `overflow-auto`.
+        The `prose` class from Tailwind Typography automatically makes child `<pre>` tags
+        scrollable on the x-axis, which is the desired behavior for code blocks.
+        Removing this class prevents the entire message bubble from scrolling.
+      */}
+      <div className="prose prose-sm dark:prose-invert max-w-none flex-grow">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{

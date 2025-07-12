@@ -51,7 +51,7 @@ export default function QuestionDetail() {
   const supabase = createSupabaseBrowserClient();
   const title = decodeURIComponent(params?.title as string);
 
-  // --- OPTIMIZED Chat Panel Resizing Logic ---
+  // --- Chat Panel Resizing Logic ---
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
@@ -62,7 +62,6 @@ export default function QuestionDetail() {
   }, []);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    // Wrap state updates in requestAnimationFrame for smooth, non-janky resizing.
     if (animationFrameId.current) {
         cancelAnimationFrame(animationFrameId.current);
     }
@@ -223,7 +222,8 @@ export default function QuestionDetail() {
         </AnimatePresence>
 
         {/* --- MAIN CONTENT PANEL --- */}
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+          {/* Mobile Tabs */}
           <div className="lg:hidden border-b border-slate-200 dark:border-zinc-800 px-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm">
             <Tabs
               fullWidth
@@ -269,7 +269,6 @@ export default function QuestionDetail() {
               initial={{ width: 0, opacity: 0, x: 50 }}
               animate={{ width: chatWidth, opacity: 1, x: 0 }}
               exit={{ width: 0, opacity: 0, x: 50 }}
-              // OPTIMIZED: Make width changes instant during resize, but animated otherwise
               transition={{
                 ease: "easeInOut",
                 duration: 0.3,
@@ -277,11 +276,13 @@ export default function QuestionDetail() {
               }}
               className="hidden lg:flex"
             >
-              <div onMouseDown={handleMouseDown} className="w-2 cursor-col-resize flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800/50 dark:hover:bg-zinc-700 transition-colors">
+              {/* Resizer Handle */}
+              <div onMouseDown={handleMouseDown} className="w-2 cursor-col-resize flex-shrink-0 flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800/50 dark:hover:bg-zinc-700 transition-colors">
                 <GripVertical size={16} className="text-slate-400 dark:text-zinc-500" />
               </div>
-              {/* FIXED: This flexbox structure ensures the chat component fills the entire vertical space */}
-              <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-zinc-900 border-l border-slate-200 dark:border-zinc-800">
+              {/* Chat Content */}
+              {/* REFACTOR: Added min-w-0 to prevent this flex item from expanding to fit its content (e.g., a wide code block). This is the key fix. */}
+              <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-white dark:bg-zinc-900 border-l border-slate-200 dark:border-zinc-800">
                 <div className="flex-1 flex flex-col h-full">
                   {question ? <QuestionChat question={question} /> : <div className="p-4 text-center text-sm text-slate-500">Loading...</div>}
                 </div>
@@ -296,21 +297,26 @@ export default function QuestionDetail() {
         <div className="bg-white dark:bg-zinc-900 border-t border-slate-200 dark:border-zinc-800">
             <button
                 onClick={() => setIsMobileChatOpen(!isMobileChatOpen)}
-                className="w-full p-4 flex justify-between items-center"
+                className="w-full p-3 flex justify-between items-center"
                 aria-expanded={isMobileChatOpen}
+                aria-label="Toggle Chat"
             >
-                <ChevronUp size={20} className={clsx("transition-transform", { "rotate-180": !isMobileChatOpen })} />
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <MessageSquare size={16} />
+                  <span>AI Assistant</span>
+                </div>
+                <ChevronUp size={20} className={clsx("transition-transform duration-300", { "rotate-180": !isMobileChatOpen })} />
             </button>
             <AnimatePresence>
             {isMobileChatOpen && (
                 <motion.div
                     initial={{ height: 0 }}
-                    animate={{ height: "auto" }}
+                    animate={{ height: "80vh" }}
                     exit={{ height: 0 }}
                     transition={{ duration: 0.3, ease: "easeInOut" }}
                     className="overflow-hidden"
                 >
-                    <div className="p-4 border-t border-slate-200 dark:border-zinc-800 h-[40vh]">
+                    <div className="border-t border-slate-200 dark:border-zinc-800 h-full">
                         {question ? <QuestionChat question={question} /> : <div className="p-4 text-center text-sm text-slate-500">Loading chat...</div>}
                     </div>
                 </motion.div>
