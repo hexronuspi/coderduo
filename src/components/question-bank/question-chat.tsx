@@ -61,7 +61,7 @@ export function QuestionChat({ question }: QuestionChatProps) {
   };
 
   return (
-    <div className="flex flex-col h-full max-h-[75vh]">
+    <div className="flex flex-col h-full">
       {/* Chat Header */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">

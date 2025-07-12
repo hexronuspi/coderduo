@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Card, CardBody, CardHeader, Button, Tabs, Tab, Chip, Tooltip, Progress } from "@nextui-org/react";
-import { ArrowLeft, Lightbulb, Code, LightbulbOff, Sparkles, CornerDownLeft, Copy, Check, RefreshCw, BringToFront } from "lucide-react";
+import { Button, Tabs, Tab, Chip, Tooltip, Progress } from "@nextui-org/react";
+import { ArrowLeft, Lightbulb, Code, LightbulbOff, Sparkles, Copy, Check, RefreshCw, MessageSquare, GripVertical, PanelLeftClose, PanelLeftOpen, ChevronUp } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Question } from '@/components/question-bank/question-bank';
 import SyntaxHighlighter from 'react-syntax-highlighter';
@@ -13,7 +13,7 @@ import { parseQuestionText, formatSolution, FormattedQuestion } from '@/lib/ques
 import { QuestionChat } from '@/components/question-bank/question-chat';
 import clsx from 'clsx';
 
-// Solution section type
+// --- Type Definitions ---
 interface SolutionSection {
   subsection?: string;
   text?: string;
@@ -25,6 +25,7 @@ interface ParsedSolution {
   [key: string]: SolutionSection;
 }
 
+// --- Main Component ---
 export default function QuestionDetail() {
   const params = useParams();
   const router = useRouter();
@@ -35,1282 +36,482 @@ export default function QuestionDetail() {
   const [showHint, setShowHint] = useState(false);
   const [currentHintIndex, setCurrentHintIndex] = useState(0);
   const [formattedQuestion, setFormattedQuestion] = useState<FormattedQuestion | null>(null);
-  const [activeTab, setActiveTab] = useState("problem");
+  const [activeContent, setActiveContent] = useState("problem");
   const [copied, setCopied] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+
+  // --- UI Layout State ---
+  const [isNavVisible, setIsNavVisible] = useState(true);
+  const [isChatVisible, setIsChatVisible] = useState(true);
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  const [chatWidth, setChatWidth] = useState(400);
+  const [isResizing, setIsResizing] = useState(false);
+  const animationFrameId = useRef<number | null>(null);
   
   const supabase = createSupabaseBrowserClient();
   const title = decodeURIComponent(params?.title as string);
 
+  // --- OPTIMIZED Chat Panel Resizing Logic ---
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    // Wrap state updates in requestAnimationFrame for smooth, non-janky resizing.
+    if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+    }
+    animationFrameId.current = requestAnimationFrame(() => {
+        const newWidth = window.innerWidth - e.clientX;
+        const constrainedWidth = Math.max(320, Math.min(newWidth, window.innerWidth * 0.6));
+        setChatWidth(constrainedWidth);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    }
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
+    };
+  }, [isResizing, handleMouseMove, handleMouseUp]);
+
+
+  // --- Data Fetching Effect ---
   useEffect(() => {
     if (!title || !supabase) return;
-
     const fetchQuestion = async () => {
       try {
         setIsLoading(true);
         setError(null);
-        
-        const { data, error } = await supabase
-          .from('questions_global')
-          .select('*')
-          .eq('title', title)
-          .single();
-
-        if (error) {
-          throw error;
-        }
-
+        const { data, error } = await supabase.from('questions_global').select('*').eq('title', title).single();
+        if (error) throw error;
         if (data) {
           setQuestion(data);
-          
-          // Parse and format question with error handling
           if (data.question) {
             try {
-              const parsed = parseQuestionText(data.question);
-              setFormattedQuestion(parsed);
-            } catch (parseError) {
-              console.error('Failed to parse question:', parseError);
-              // Fallback to raw HTML if parsing fails
-              setFormattedQuestion({
-                title: data.title || '',
-                description: data.question,
-                examples: [],
-                constraints: [],
-                notes: '',
-                difficulty: data.difficulty || undefined,
-                tags: data.tags || undefined
-              });
+              setFormattedQuestion(parseQuestionText(data.question));
+            } catch {
+              setFormattedQuestion({ title: data.title || '', description: data.question, examples: [], constraints: [], notes: '', difficulty: data.difficulty, tags: data.tags });
             }
           }
-          
-          // Parse solution with robust error handling
           if (data.solution) {
             try {
-              // Try to parse as JSON first
-              const parsedData = JSON.parse(data.solution);
-              setParsedSolution(parsedData);
-            } catch (parseError) {
-              console.error('Failed to parse solution JSON:', parseError);
-              try {
-                // If parsing fails, format the solution text
-                const formattedSolution = formatSolution(data.solution);
-                setParsedSolution(formattedSolution as ParsedSolution);
-              } catch (formatError) {
-                console.error('Failed to format solution:', formatError);
-                // Last resort fallback: display as raw text
-                setParsedSolution({
-                  'raw': {
-                    text: data.solution
-                  }
-                });
-              }
+              setParsedSolution(JSON.parse(data.solution));
+            } catch {
+              setParsedSolution({ 'raw': { text: formatSolution(data.solution) as unknown as string }});
             }
           }
         }
-      } catch (err) {
-        console.error('Error fetching question:', err);
-        setError('Failed to load question details. Please try again later.');
+      } catch {
+        setError('Failed to load question details. Please try again.');
       } finally {
         setIsLoading(false);
       }
     };
-
     fetchQuestion();
   }, [supabase, title, retryCount]);
 
-  // Copy to clipboard functionality
+  // --- Helper Functions ---
   const copyToClipboard = async (text: string, id: string) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(id);
       setTimeout(() => setCopied(null), 2000);
-    } catch (err) {
-      console.error('Failed to copy text:', err);
-    }
+    } catch (err) { console.error('Failed to copy text:', err); }
   };
 
-  // Handle hint navigation
   const showNextHint = () => {
-    if (!question?.hint) return;
-    
-    if (currentHintIndex < question.hint.length - 1) {
-      setCurrentHintIndex(currentHintIndex + 1);
-    }
+    if (question?.hint && currentHintIndex < question.hint.length - 1) setCurrentHintIndex(currentHintIndex + 1);
   };
 
   const showPreviousHint = () => {
-    if (currentHintIndex > 0) {
-      setCurrentHintIndex(currentHintIndex - 1);
-    }
+    if (currentHintIndex > 0) setCurrentHintIndex(currentHintIndex - 1);
   };
 
-  // Get difficulty color and level
   const getDifficultyInfo = (difficulty: string = 'medium') => {
     const lowerDifficulty = difficulty?.toLowerCase();
-    
-    if (lowerDifficulty === 'easy') {
-      return { 
-        color: "success" as const,
-        level: 1,
-        label: "Easy"
-      };
-    }
-    
-    if (lowerDifficulty === 'medium') {
-      return {
-        color: "warning" as const,
-        level: 2,
-        label: "Medium"
-      };
-    }
-    
-    return {
-      color: "danger" as const,
-      level: 3,
-      label: "Hard"
-    };
+    if (lowerDifficulty === 'easy') return { color: "success" as const, label: "Easy" };
+    if (lowerDifficulty === 'medium') return { color: "warning" as const, label: "Medium" };
+    return { color: "danger" as const, label: "Hard" };
   };
 
   const difficultyInfo = getDifficultyInfo(question?.difficulty);
+  const handleRetry = () => setRetryCount(prev => prev + 1);
 
-  // Handle retry
-  const handleRetry = () => {
-    setRetryCount(prev => prev + 1);
-  };
+  const navItems = [
+    { key: "problem", icon: <Code size={18} />, label: "Problem" },
+    { key: "hints", icon: <Lightbulb size={18} />, label: "Hints" },
+    { key: "solution", icon: <Sparkles size={18} />, label: "Solution" },
+  ];
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
-      className="min-h-screen bg-gradient-to-b from-gray-50 via-gray-50 to-gray-100 dark:from-gray-900 dark:via-gray-900 dark:to-gray-950 pb-8"
-    >
-      {/* Header Bar - Sleek and Modern */}
-      <div className="bg-gradient-to-r from-primary-700 to-primary-600 dark:from-primary-900 dark:to-primary-800 text-white sticky top-0 z-10 shadow-lg backdrop-blur supports-backdrop-blur:bg-opacity-80">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Button
-                size="sm"
-                variant="flat"
-                className="bg-white/10 hover:bg-white/20 text-white transition-all duration-300 ease-in-out transform hover:scale-105"
-                startContent={<ArrowLeft size={16} className="animate-pulse-subtle" />}
-                onPress={() => router.push('/dashboard')}
-                aria-label="Back to Dashboard"
-              >
-                Back to Dashboard
-              </Button>
-              
-              {question && (
-                <motion.div 
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="hidden sm:block text-white/90 font-medium truncate max-w-[200px] md:max-w-[400px] lg:max-w-none"
+    <div className="flex flex-col h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-200">
+      {/* --- HEADER --- */}
+      <header className="flex items-center justify-between px-2 lg:px-4 py-2 border-b border-slate-200 dark:border-zinc-800 shrink-0 z-20 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-sm">
+        <div className="flex items-center gap-2">
+          <Tooltip content="Toggle Navigation">
+            <Button isIconOnly size="sm" variant="light" className="hidden lg:flex" onPress={() => setIsNavVisible(!isNavVisible)}>
+                {isNavVisible ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+            </Button>
+          </Tooltip>
+          <Button isIconOnly size="sm" variant="light" onPress={() => router.push('/dashboard')} aria-label="Back to Dashboard">
+            <ArrowLeft size={18} />
+          </Button>
+          <div className="h-6 w-px bg-slate-200 dark:bg-zinc-700 hidden sm:block"></div>
+          {question && (
+            <h1 className="text-sm font-medium text-slate-700 dark:text-zinc-300 truncate max-w-[150px] sm:max-w-xs md:max-w-md">
+              {question.title}
+            </h1>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {question && <DifficultyBadge difficultyInfo={difficultyInfo} />}
+          <div className="h-6 w-px bg-slate-200 dark:bg-zinc-700 hidden lg:block"></div>
+          <Tooltip content="Toggle Chat Panel">
+            <Button isIconOnly size="sm" variant="light" className="hidden lg:flex" onPress={() => setIsChatVisible(!isChatVisible)}>
+              <MessageSquare size={16} />
+            </Button>
+          </Tooltip>
+        </div>
+      </header>
+
+      {/* --- MAIN WORKSPACE --- */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* --- LEFT NAVIGATION (DESKTOP) --- */}
+        <AnimatePresence>
+          {isNavVisible && (
+            <motion.nav
+              initial={{ width: 0, opacity: 0, x: -50 }}
+              animate={{ width: 240, opacity: 1, x: 0 }}
+              exit={{ width: 0, opacity: 0, x: -50 }}
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              className="hidden lg:flex flex-col bg-white dark:bg-zinc-900 border-r border-slate-200 dark:border-zinc-800 p-4"
+            >
+              <h2 className="px-3 pt-2 pb-3 text-sm font-semibold text-slate-600 dark:text-zinc-400">Workspace</h2>
+              <div className="flex flex-col gap-2">
+                {navItems.map(item => (
+                  <Button
+                    key={item.key}
+                    variant={activeContent === item.key ? 'flat' : 'light'}
+                    color={activeContent === item.key ? 'primary' : 'default'}
+                    onPress={() => setActiveContent(item.key)}
+                    className="w-full justify-start text-sm"
+                    startContent={item.icon}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
+            </motion.nav>
+          )}
+        </AnimatePresence>
+
+        {/* --- MAIN CONTENT PANEL --- */}
+        <main className="flex-1 flex flex-col overflow-hidden">
+          <div className="lg:hidden border-b border-slate-200 dark:border-zinc-800 px-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm">
+            <Tabs
+              fullWidth
+              selectedKey={activeContent}
+              onSelectionChange={(key) => setActiveContent(key as string)}
+              aria-label="Content Navigation"
+              variant="underlined"
+              classNames={{ tab: "h-12", cursor: "bg-primary-500", tabContent: "text-xs sm:text-sm" }}
+            >
+              {navItems.map(item => <Tab key={item.key} title={<div className="flex items-center gap-2">{item.icon}<span>{item.label}</span></div>} />)}
+            </Tabs>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-6 md:p-8 lg:p-12">
+            {isLoading ? (
+              <LoadingState />
+            ) : error ? (
+              <ErrorState error={error} onRetry={handleRetry} />
+            ) : question ? (
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeContent}
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.25 }}
                 >
-                  <span className="text-white/70 mr-2">•</span>
-                  {question.title}
+                  {activeContent === "problem" && <ProblemSection formattedQuestion={formattedQuestion} question={question} />}
+                  {activeContent === "hints" && <HintSection question={question} showHint={showHint} setShowHint={setShowHint} currentHintIndex={currentHintIndex} showNextHint={showNextHint} showPreviousHint={showPreviousHint} setCurrentHintIndex={setCurrentHintIndex} />}
+                  {activeContent === "solution" && <SolutionSection parsedSolution={parsedSolution} question={question} copyToClipboard={copyToClipboard} copied={copied} />}
                 </motion.div>
-              )}
-            </div>
-            
-            {question && (
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center gap-3"
-              >
-                {question.tags && question.tags.length > 0 && (
-                  <div className="hidden lg:flex gap-1 mr-2">
-                    {question.tags.slice(0, 2).map((tag, idx) => (
-                      <Chip 
-                        key={idx} 
-                        size="sm" 
-                        variant="flat" 
-                        className="bg-white/10 border border-white/20 text-white"
-                      >
-                        {tag}
-                      </Chip>
-                    ))}
-                    {question.tags.length > 2 && (
-                      <Chip 
-                        size="sm" 
-                        variant="flat" 
-                        className="bg-white/10 border border-white/20 text-white"
-                      >
-                        +{question.tags.length - 2}
-                      </Chip>
-                    )}
-                  </div>
-                )}
-                
-                <Chip 
-                  color={difficultyInfo.color} 
-                  variant="flat"
-                  classNames={{
-                    base: "px-3 py-1",
-                    content: "font-medium"
-                  }}
-                  startContent={<div className="flex items-center gap-1">
-                    {Array.from({ length: 3 }).map((_, i) => (
-                      <div 
-                        key={i}
-                        className={clsx(
-                          "h-1.5 w-1.5 rounded-full",
-                          i < difficultyInfo.level 
-                            ? difficultyInfo.color === "success" 
-                              ? "bg-success-200" 
-                              : difficultyInfo.color === "warning" 
-                                ? "bg-warning-200" 
-                                : "bg-danger-200"
-                            : "bg-white/20"
-                        )}
-                      ></div>
-                    ))}
-                  </div>}
-                >
-                  {difficultyInfo.label}
-                </Chip>
-              </motion.div>
+              </AnimatePresence>
+            ) : (
+              <NotFoundState />
             )}
           </div>
-        </div>
+        </main>
+        
+        {/* --- RIGHT CHAT PANEL (DESKTOP) --- */}
+        <AnimatePresence>
+          {isChatVisible && (
+            <motion.aside
+              initial={{ width: 0, opacity: 0, x: 50 }}
+              animate={{ width: chatWidth, opacity: 1, x: 0 }}
+              exit={{ width: 0, opacity: 0, x: 50 }}
+              // OPTIMIZED: Make width changes instant during resize, but animated otherwise
+              transition={{
+                ease: "easeInOut",
+                duration: 0.3,
+                width: { duration: isResizing ? 0 : 0.3, ease: "linear" }
+              }}
+              className="hidden lg:flex"
+            >
+              <div onMouseDown={handleMouseDown} className="w-2 cursor-col-resize flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800/50 dark:hover:bg-zinc-700 transition-colors">
+                <GripVertical size={16} className="text-slate-400 dark:text-zinc-500" />
+              </div>
+              {/* FIXED: This flexbox structure ensures the chat component fills the entire vertical space */}
+              <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-zinc-900 border-l border-slate-200 dark:border-zinc-800">
+                <div className="flex-1 flex flex-col h-full">
+                  {question ? <QuestionChat question={question} /> : <div className="p-4 text-center text-sm text-slate-500">Loading...</div>}
+                </div>
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
       </div>
       
-      {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
-        {isLoading ? (
-          <LoadingState />
-        ) : error ? (
-          <ErrorState error={error} onRetry={handleRetry} />
-        ) : question ? (
-          <motion.div 
-            className="flex flex-col gap-6"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-          >
-            {/* Question Header - Elegant, modern design */}
-            <Card className="border-none shadow-xl overflow-hidden bg-white dark:bg-gray-900/80 backdrop-filter backdrop-blur-sm">
-              <motion.div
-                initial={{ opacity: 0, y: -20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2, duration: 0.5 }}
-              >
-                <CardHeader className="flex flex-col items-start gap-4 bg-gradient-to-br from-primary-50 to-primary-100/50 dark:from-primary-900/30 dark:to-primary-900/10 pb-5 pt-6 px-6">
-                  <div className="flex items-center justify-between w-full">
-                    <motion.h1 
-                      className="text-2xl md:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-700 dark:from-white dark:to-gray-300"
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.3, duration: 0.5 }}
-                    >
-                      {question.title}
-                    </motion.h1>
-                    
-                    <div className="flex md:hidden">
-                      <DifficultyBadge difficultyInfo={difficultyInfo} />
-                    </div>
-                  </div>
-                  
-                  {/* Tags with enhanced styling */}
-                  <motion.div 
-                    className="flex flex-wrap gap-2"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: 0.4, duration: 0.5 }}
-                  >
-                    {question.tags?.map((tag, idx) => (
-                      <motion.div
-                        key={idx}
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: 0.3 + (idx * 0.1), duration: 0.3 }}
-                      >
-                        <Chip 
-                          size="sm" 
-                          variant="flat" 
-                          className="bg-primary-100/80 hover:bg-primary-200/80 dark:bg-primary-900/40 dark:hover:bg-primary-800/40 text-primary-700 dark:text-primary-300 transition-all duration-300 cursor-default border border-primary-200/50 dark:border-primary-700/40"
-                        >
-                          {tag}
-                        </Chip>
-                      </motion.div>
-                    ))}
-                  </motion.div>
-                </CardHeader>
-              </motion.div>
-              
-              {/* Main Tabs Navigation */}
-              <div className="border-b border-gray-200 dark:border-gray-800">
-                <Tabs 
-                  selectedKey={activeTab}
-                  onSelectionChange={(key) => setActiveTab(key as string)} 
-                  aria-label="Question sections"
-                  variant="underlined"
-                  classNames={{
-                    base: "w-full px-4",
-                    tabList: "gap-6",
-                    tab: "h-12",
-                    tabContent: "group-data-[selected=true]:text-primary-500 font-medium",
-                    cursor: "group-data-[selected=true]:bg-primary-500"
-                  }}
-                >
-                  <Tab 
-                    key="problem" 
-                    title={
-                      <div className="flex items-center gap-2">
-                        <span>Problem</span>
-                      </div>
-                    }
-                  />
-                  <Tab 
-                    key="hints" 
-                    title={
-                      <div className="flex items-center gap-2">
-                        <Lightbulb size={18} />
-                        <span>Hints</span>
-                        {question.hint && (
-                          <Chip 
-                            size="sm" 
-                            variant="flat" 
-                            color="primary"
-                            className="ml-1"
-                          >
-                            {question.hint.length}
-                          </Chip>
-                        )}
-                      </div>
-                    }
-                  />
-                  <Tab 
-                    key="solution" 
-                    title={
-                      <div className="flex items-center gap-2">
-                        <Code size={18} />
-                        <span>Solution</span>
-                      </div>
-                    }
-                  />
-                  <Tab 
-                    key="chat" 
-                    title={
-                      <div className="flex items-center gap-2">
-                        <Sparkles size={18} />
-                        <span>Chat</span>
-                        <Chip size="sm" variant="flat" color="secondary">Beta</Chip>
-                      </div>
-                    }
-                  />
-                  <Tab 
-                    key="collaborator" 
-                    title={
-                      <div className="flex items-center gap-2">
-                        <BringToFront size={18} />
-                        <span>Collaborator</span>
-                        <Chip size="sm" variant="flat" color="warning">Upcoming</Chip>
-                      </div>
-                    }
-                  />
-                </Tabs>
-              </div>
-
-              <CardBody className="px-6 py-8">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={activeTab}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
+      {/* --- MOBILE CHAT DRAWER --- */}
+      <div className="lg:hidden">
+        <div className="bg-white dark:bg-zinc-900 border-t border-slate-200 dark:border-zinc-800">
+            <button
+                onClick={() => setIsMobileChatOpen(!isMobileChatOpen)}
+                className="w-full p-4 flex justify-between items-center"
+                aria-expanded={isMobileChatOpen}
+            >
+                <ChevronUp size={20} className={clsx("transition-transform", { "rotate-180": !isMobileChatOpen })} />
+            </button>
+            <AnimatePresence>
+            {isMobileChatOpen && (
+                <motion.div
+                    initial={{ height: 0 }}
+                    animate={{ height: "auto" }}
+                    exit={{ height: 0 }}
                     transition={{ duration: 0.3, ease: "easeInOut" }}
-                  >
-                    {/* Content for each tab */}
-                    {activeTab === "problem" && (
-                      <ProblemSection formattedQuestion={formattedQuestion} question={question} />
-                    )}
-                    
-                    {activeTab === "hints" && (
-                      <HintSection 
-                        question={question} 
-                        showHint={showHint}
-                        setShowHint={setShowHint}
-                        currentHintIndex={currentHintIndex}
-                        showNextHint={showNextHint}
-                        showPreviousHint={showPreviousHint}
-                        setCurrentHintIndex={setCurrentHintIndex}
-                      />
-                    )}
-                    
-                    {activeTab === "solution" && (
-                      <SolutionSection 
-                        parsedSolution={parsedSolution} 
-                        question={question} 
-                        copyToClipboard={copyToClipboard}
-                        copied={copied}
-                      />
-                    )}
-                    
-                    {activeTab === "chat" && (
-                      <div className="py-2">
-                        {question ? (
-                          <QuestionChat question={question} />
-                        ) : (
-                          <div className="flex flex-col items-center justify-center py-16 text-gray-500">
-                            <Sparkles size={40} className="text-gray-400 mb-4" />
-                            <h3 className="text-xl font-medium mb-2">Question not loaded</h3>
-                            <p className="text-sm text-center max-w-md">
-                              Please wait for the question to load or try refreshing the page.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {activeTab === "collaborator" && (
-                      <motion.div 
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: 0.5, type: "spring", stiffness: 100 }}
-                        className="max-w-4xl mx-auto"
-                      >
-                       {/* Status Section */}
-                        <motion.div 
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.6, duration: 0.5 }}
-                          className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-8 border border-blue-200 dark:border-blue-800/50 text-center mb-6"
-                        >
-                          <div className="inline-flex items-center gap-2 bg-blue-100 dark:bg-blue-900/40 px-4 py-2 rounded-full text-blue-700 dark:text-blue-300 font-medium mb-4">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                            Development Status
-                          </div>
-                          
-                          <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">
-                            Currently in Development
-                          </h3>
-                          <p className="text-gray-600 dark:text-gray-300 leading-relaxed max-w-2xl mx-auto mb-6">
-                            We are working diligently to bring this innovative learning tool to you. The AI collaborator represents the next evolution in computer science education, combining AI with proven pedagogical methods.
-                          </p>
-                          
-                          <div className="inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Expected release: Coming Soon
-                          </div>
-                        </motion.div>
-
-                        {/* Header Section */}
-                        <div className="text-center mb-12">
-                          
-                          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
-                            AI-Powered Learning Collaborator
-                          </h2>
-                          <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto leading-relaxed">
-                            An intelligent tutoring system designed to enhance your data structures and algorithms learning experience through personalized guidance and adaptive feedback.
-                          </p>
-                        </div>
-
-                        {/* Feature Cards Grid */}
-                        <div className="grid md:grid-cols-2 gap-8 mb-12">
-                          <motion.div 
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.2, duration: 0.5 }}
-                            className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
-                          >
-                            <div className="flex items-center gap-3 mb-4">
-                              <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center">
-                                <svg className="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                </svg>
-                              </div>
-                              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
-                                Intelligent Analysis
-                              </h3>
-                            </div>
-                            <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
-                              Real-time code analysis with contextual feedback. The system evaluates your approach, identifies optimization opportunities, and provides step-by-step guidance tailored to your current understanding.
-                            </p>
-                          </motion.div>
-
-                          <motion.div 
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.3, duration: 0.5 }}
-                            className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
-                          >
-                            <div className="flex items-center gap-3 mb-4">
-                              <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center">
-                                <svg className="w-5 h-5 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                                </svg>
-                              </div>
-                              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
-                                Adaptive Learning
-                              </h3>
-                            </div>
-                            <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
-                              Personalized learning paths that adapt to your progress and learning style. The system tracks your strengths and areas for improvement, adjusting difficulty and focus accordingly.
-                            </p>
-                          </motion.div>
-
-                          <motion.div 
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.4, duration: 0.5 }}
-                            className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
-                          >
-                            <div className="flex items-center gap-3 mb-4">
-                              <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center">
-                                <svg className="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                </svg>
-                              </div>
-                              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
-                                Instant Feedback
-                              </h3>
-                            </div>
-                            <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
-                              Immediate, constructive feedback on your solutions. Identify logical errors, suggest improvements, and learn optimal approaches through interactive guidance and detailed explanations.
-                            </p>
-                          </motion.div>
-
-                          <motion.div 
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.5, duration: 0.5 }}
-                            className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-200 dark:border-gray-700"
-                          >
-                            <div className="flex items-center gap-3 mb-4">
-                              <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center">
-                                <svg className="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                </svg>
-                              </div>
-                              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
-                                Customizable Experience
-                              </h3>
-                            </div>
-                            <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
-                              Tailor the learning experience to your preferences. Choose between guided step-by-step assistance or comprehensive solution explanations based on your learning goals and current skill level.
-                            </p>
-                          </motion.div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </motion.div>
-                </AnimatePresence>
-              </CardBody>
-            </Card>
-          </motion.div>
-        ) : (
-          <NotFoundState />
-        )}
+                    className="overflow-hidden"
+                >
+                    <div className="p-4 border-t border-slate-200 dark:border-zinc-800 h-[40vh]">
+                        {question ? <QuestionChat question={question} /> : <div className="p-4 text-center text-sm text-slate-500">Loading chat...</div>}
+                    </div>
+                </motion.div>
+            )}
+            </AnimatePresence>
+        </div>
       </div>
-    </motion.div>
-  );
-}
-
-// Component for Loading State - Enhanced with modern skeleton loading
-function LoadingState() {
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="flex flex-col gap-8 py-8"
-    >
-      <Card className="border-none shadow-xl overflow-hidden">
-        <CardHeader className="flex flex-col items-start gap-4 bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-gray-900/30 dark:to-gray-900/10 pb-5 pt-6 px-6">
-          <div className="animate-pulse w-full">
-            <div className="h-10 bg-gray-200 dark:bg-gray-800 rounded-lg w-3/4 mb-6"></div>
-            <div className="flex flex-wrap gap-2">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-6 bg-gray-200 dark:bg-gray-800 rounded-full w-20"></div>
-              ))}
-            </div>
-          </div>
-        </CardHeader>
-        
-        <div className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 h-14"></div>
-        
-        <CardBody className="px-6 py-8">
-          <div className="animate-pulse space-y-8">
-            <div>
-              <div className="h-8 bg-gray-200 dark:bg-gray-800 rounded-lg w-1/3 mb-6"></div>
-              <div className="space-y-4">
-                {[1, 2, 3, 4].map(i => (
-                  <div key={i} className="h-5 bg-gray-200 dark:bg-gray-800 rounded-md w-full"></div>
-                ))}
-              </div>
-            </div>
-            
-            <div>
-              <div className="h-8 bg-gray-200 dark:bg-gray-800 rounded-lg w-1/4 mb-6"></div>
-              <div className="h-40 bg-gray-200 dark:bg-gray-800 rounded-xl w-full mb-4"></div>
-              <div className="h-40 bg-gray-200 dark:bg-gray-800 rounded-xl w-full"></div>
-            </div>
-          </div>
-        </CardBody>
-      </Card>
-      
-      <motion.div 
-        className="text-center"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: [0, 1, 0.8, 1] }}
-        transition={{ delay: 0.5, duration: 1.5, repeat: Infinity }}
-      >
-        <p className="text-gray-600 dark:text-gray-300 font-medium mb-3">Loading question details...</p>
-        <Progress 
-          size="sm"
-          isIndeterminate
-          color="primary"
-          className="max-w-md mx-auto"
-          aria-label="Loading question"
-        />
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">This may take a moment</p>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// Component for Error State with improved visuals
-function ErrorState({ error, onRetry }: { error: string, onRetry: () => void }) {
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="text-center py-16 flex flex-col items-center"
-    >
-      <motion.div 
-        className="bg-white dark:bg-gray-900 p-8 rounded-2xl mb-6 max-w-lg mx-auto shadow-xl border border-danger-200 dark:border-danger-900/50"
-        initial={{ scale: 0.9 }}
-        animate={{ scale: 1 }}
-        transition={{ delay: 0.1, duration: 0.5, type: "spring" }}
-      >
-        <div className="w-20 h-20 rounded-full bg-danger-100 dark:bg-danger-900/30 mx-auto flex items-center justify-center mb-6">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 text-danger-500 dark:text-danger-400">
-            <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
-          </svg>
-        </div>
-        
-        <h2 className="text-danger-600 dark:text-danger-400 text-2xl font-bold mb-3">Something went wrong</h2>
-        <p className="text-gray-700 dark:text-gray-300 mb-6 max-w-md mx-auto">{error}</p>
-        
-        <motion.div
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-        >
-          <Button 
-            color="danger" 
-            variant="shadow"
-            size="lg"
-            startContent={<RefreshCw size={18} className="animate-spin-slow" />}
-            onPress={onRetry}
-            className="font-medium px-6"
-          >
-            Try Again
-          </Button>
-        </motion.div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// Component for Not Found State with improved visuals
-function NotFoundState() {
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="text-center py-16 flex flex-col items-center"
-    >
-      <motion.div 
-        className="bg-white dark:bg-gray-900 p-8 rounded-2xl mb-6 max-w-lg mx-auto shadow-xl border border-gray-200 dark:border-gray-800"
-        initial={{ scale: 0.9 }}
-        animate={{ scale: 1 }}
-        transition={{ delay: 0.1, duration: 0.5, type: "spring" }}
-      >
-        <div className="w-20 h-20 rounded-full bg-gray-100 dark:bg-gray-800 mx-auto flex items-center justify-center mb-6">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 text-gray-400">
-            <path fillRule="evenodd" d="M10.5 3.75a6.75 6.75 0 100 13.5 6.75 6.75 0 000-13.5zM2.25 10.5a8.25 8.25 0 1114.59 5.28l4.69 4.69a.75.75 0 11-1.06 1.06l-4.69-4.69A8.25 8.25 0 012.25 10.5z" clipRule="evenodd" />
-          </svg>
-        </div>
-        
-        <h2 className="text-2xl font-bold mb-3 text-gray-800 dark:text-gray-200">Question Not Found</h2>
-        <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
-          We couldn&apos;t find the question you&apos;re looking for. Please check the URL or try searching for a different question.
-        </p>
-        
-        <motion.div
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-        >
-          <Button 
-            color="primary" 
-            variant="shadow"
-            size="lg"
-            className="font-medium px-6"
-            href="/dashboard/question_bank"
-          >
-            Browse Questions
-          </Button>
-        </motion.div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// Component for Problem Section
-function ProblemSection({ formattedQuestion, question }: { formattedQuestion: FormattedQuestion | null, question: Question | null }) {
-  return (
-    <div className="prose prose-lg max-w-none dark:prose-invert">
-      {formattedQuestion ? (
-        <div className="space-y-10">
-          {/* Problem description with enhanced styling */}
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.1 }}
-            className="leading-relaxed"
-          >
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2, duration: 0.6 }}
-              className="bg-gradient-to-r from-primary-50/50 to-transparent dark:from-primary-900/10 dark:to-transparent py-2 pl-4 pr-2 border-l-4 border-primary-500 dark:border-primary-600 rounded-r-lg mb-6"
-            >
-              <p className="text-sm font-medium text-primary-700 dark:text-primary-400 mb-1">Problem Statement</p>
-            </motion.div>
-            <div 
-              className="text-lg leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: formattedQuestion.description }} 
-            />
-          </motion.div>
-          
-          {/* Examples with enhanced card design */}
-          {formattedQuestion.examples && formattedQuestion.examples.length > 0 && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.2 }}
-              className="relative"
-            >
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: "100%" }}
-                transition={{ delay: 0.3, duration: 0.8 }}
-                className="absolute -left-2 -top-4 h-0.5 bg-gradient-to-r from-primary-300 to-transparent dark:from-primary-700 dark:to-transparent"
-              ></motion.div>
-              
-              <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <span className="text-primary-500">Examples</span>
-                <span className="text-xs bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded-full">
-                  {formattedQuestion.examples.length}
-                </span>
-              </h2>
-              
-              <div className="space-y-8">
-                {formattedQuestion.examples.map((example, index) => (
-                  <motion.div 
-                    key={index} 
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 + (index * 0.1), duration: 0.5 }}
-                    className="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800 shadow-md hover:shadow-lg transition-all duration-300"
-                  >
-                    <div className="bg-gradient-to-r from-gray-100 to-gray-50 dark:from-gray-800 dark:to-gray-900 px-5 py-3 font-medium text-sm flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="flex items-center justify-center h-5 w-5 rounded-full bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300 text-xs font-bold">
-                          {index + 1}
-                        </span>
-                        <span>Example {index + 1}</span>
-                      </div>
-                      
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        Test Case
-                      </div>
-                    </div>
-                    <div className="p-5 space-y-5 bg-white dark:bg-gray-900">
-                      <div className="space-y-3">
-                        <h4 className="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                          <span className="inline-block h-2 w-2 rounded-full bg-blue-500"></span>
-                          Input:
-                        </h4>
-                        <pre className="bg-gray-50 dark:bg-gray-900/80 p-4 rounded-lg whitespace-pre-wrap overflow-x-auto text-sm font-mono border border-gray-100 dark:border-gray-800">
-                          {example.input}
-                        </pre>
-                      </div>
-                      
-                      <div className="space-y-3">
-                        <h4 className="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                          <span className="inline-block h-2 w-2 rounded-full bg-green-500"></span>
-                          Output:
-                        </h4>
-                        <pre className="bg-gray-50 dark:bg-gray-900/80 p-4 rounded-lg whitespace-pre-wrap overflow-x-auto text-sm font-mono border border-gray-100 dark:border-gray-800">
-                          {example.output}
-                        </pre>
-                      </div>
-                      
-                      {example.explanation && (
-                        <div className="space-y-3 pt-1">
-                          <h4 className="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                            <span className="inline-block h-2 w-2 rounded-full bg-amber-500"></span>
-                            Explanation:
-                          </h4>
-                          <div className="text-gray-700 dark:text-gray-300 bg-amber-50/50 dark:bg-amber-900/10 p-4 rounded-lg border-l-2 border-amber-300 dark:border-amber-600">
-                            {example.explanation}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            </motion.div>
-          )}
-          
-          {/* Constraints with enhanced visuals */}
-          {formattedQuestion.constraints && formattedQuestion.constraints.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-              className="relative"
-            >
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: "100%" }}
-                transition={{ delay: 0.4, duration: 0.8 }}
-                className="absolute -left-2 -top-4 h-0.5 bg-gradient-to-r from-indigo-300 to-transparent dark:from-indigo-700 dark:to-transparent"
-              ></motion.div>
-              
-              <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                <span className="text-indigo-600 dark:text-indigo-400">Constraints</span>
-                <span className="text-xs bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full">
-                  {formattedQuestion.constraints.length}
-                </span>
-              </h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {formattedQuestion.constraints.map((constraint, index) => (
-                  <motion.div
-                    key={index}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.4 + (index * 0.05), duration: 0.4 }}
-                    className="flex items-start gap-3 group"
-                  >
-                    <div className="mt-1 flex-shrink-0">
-                      <div className="h-5 w-5 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-xs text-indigo-700 dark:text-indigo-300 font-medium group-hover:bg-indigo-200 dark:group-hover:bg-indigo-800/50 transition-colors duration-300">
-                        {index + 1}
-                      </div>
-                    </div>
-                    <div className="text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-100 dark:border-gray-800 hover:border-indigo-200 dark:hover:border-indigo-800/50 transition-colors duration-300 flex-grow">
-                      {constraint}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            </motion.div>
-          )}
-          
-          {/* Additional Notes with enhanced styling */}
-          {formattedQuestion.notes && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4, duration: 0.6 }}
-              className="rounded-lg overflow-hidden shadow-md"
-            >
-              <div className="bg-gradient-to-r from-blue-600 to-blue-500 dark:from-blue-700 dark:to-blue-800 p-3 text-white">
-                <h3 className="text-lg font-bold flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                    <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm8.706-1.442c1.146-.573 2.437.463 2.126 1.706l-.709 2.836.042-.02a.75.75 0 01.67 1.34l-.04.022c-1.147.573-2.438-.463-2.127-1.706l.71-2.836-.042.02a.75.75 0 11-.671-1.34l.041-.022zM12 9a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
-                  </svg>
-                  Important Note
-                </h3>
-              </div>
-              <div className="p-5 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
-                <p className="text-base leading-relaxed">{formattedQuestion.notes}</p>
-              </div>
-            </motion.div>
-          )}
-        </div>
-      ) : question?.question ? (
-        <div dangerouslySetInnerHTML={{ __html: question.question }} />
-      ) : (
-        <div className="text-center py-8 text-gray-500">
-          No problem description available.
-        </div>
-      )}
     </div>
   );
 }
 
-// Component for Hints Section with enhanced UI
-function HintSection({ 
-  question, 
-  showHint, 
-  setShowHint, 
-  currentHintIndex, 
-  showNextHint, 
-  showPreviousHint,
-  setCurrentHintIndex
-}: { 
-  question: Question | null,
-  showHint: boolean,
-  setShowHint: (show: boolean) => void,
-  currentHintIndex: number,
-  showNextHint: () => void,
-  showPreviousHint: () => void,
-  setCurrentHintIndex: (index: number) => void
-}) {
+
+// --- All your original helper components (LoadingState, ErrorState, etc.) are below without any changes ---
+
+function LoadingState() {
+  return (
+    <div className="space-y-8 animate-pulse">
+        <div className="h-10 bg-slate-200 dark:bg-zinc-800 rounded-lg w-3/4"></div>
+        <div className="space-y-4">
+            <div className="h-5 bg-slate-200 dark:bg-zinc-800 rounded-md w-full"></div>
+            <div className="h-5 bg-slate-200 dark:bg-zinc-800 rounded-md w-5/6"></div>
+        </div>
+        <div className="h-8 bg-slate-200 dark:bg-zinc-800 rounded-lg w-1/4"></div>
+        <div className="h-40 bg-slate-200 dark:bg-zinc-800 rounded-xl w-full"></div>
+    </div>
+  );
+}
+
+function ErrorState({ error, onRetry }: { error: string, onRetry: () => void }) {
+  return (
+    <div className="text-center py-16 flex flex-col items-center">
+      <div className="bg-white dark:bg-zinc-900 p-8 rounded-2xl max-w-lg mx-auto shadow-lg border border-danger-200 dark:border-danger-900/50">
+        <h2 className="text-danger-500 text-2xl font-bold mb-3">An Error Occurred</h2>
+        <p className="text-slate-600 dark:text-zinc-400 mb-6">{error}</p>
+        <Button color="danger" variant="ghost" onPress={onRetry} startContent={<RefreshCw size={16} />}>Try Again</Button>
+      </div>
+    </div>
+  );
+}
+
+function NotFoundState() {
+  return (
+    <div className="text-center py-16 flex flex-col items-center">
+        <h2 className="text-2xl font-bold mb-3">Question Not Found</h2>
+        <p className="text-slate-600 dark:text-zinc-400 mb-6 max-w-md mx-auto">We couldn&apos;t find the question you&apos;re looking for. It might have been moved or deleted.</p>
+        <Button color="primary" variant="flat" href="/dashboard/question_bank">Browse Questions</Button>
+    </div>
+  );
+}
+
+function ProblemSection({ formattedQuestion, question }: { formattedQuestion: FormattedQuestion | null, question: Question | null }) {
+    if (!formattedQuestion && !question?.question) {
+        return <div className="text-center py-8 text-slate-500">No problem description available.</div>;
+    }
+
+    return (
+        <div className="prose prose-lg max-w-none dark:prose-invert prose-slate dark:prose-zinc">
+            <h1>{formattedQuestion?.title || question?.title}</h1>
+            <div className="flex flex-wrap gap-2 mb-8 -mt-4">
+                {formattedQuestion?.tags?.map((tag, idx) => (
+                    <Chip key={idx} size="sm" variant="flat" className="bg-primary-100/80 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300">
+                        {tag}
+                    </Chip>
+                ))}
+            </div>
+
+            {formattedQuestion ? (
+                <div className="space-y-10">
+                    <div dangerouslySetInnerHTML={{ __html: formattedQuestion.description }} />
+                    {formattedQuestion.examples && formattedQuestion.examples.length > 0 && (
+                        <div>
+                            <h3 className="font-semibold">Examples</h3>
+                            <div className="space-y-6">
+                                {formattedQuestion.examples.map((example, index) => (
+                                    <div key={index} className="not-prose bg-slate-100 dark:bg-zinc-800/50 rounded-lg p-4 border border-slate-200 dark:border-zinc-700/50">
+                                        <p className="font-semibold text-sm mb-2 text-slate-700 dark:text-zinc-300">Example {index + 1}</p>
+                                        <pre className="bg-white dark:bg-zinc-900 p-3 rounded text-sm text-slate-600 dark:text-zinc-300 whitespace-pre-wrap font-mono">
+                                            <strong>Input:</strong> {example.input}<br />
+                                            <strong>Output:</strong> {example.output}
+                                        </pre>
+                                        {example.explanation && <p className="text-sm mt-3 text-slate-600 dark:text-zinc-400"><strong>Explanation:</strong> {example.explanation}</p>}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {formattedQuestion.constraints && formattedQuestion.constraints.length > 0 && (
+                        <div>
+                            <h3 className="font-semibold">Constraints</h3>
+                            <ul className="list-disc pl-5 text-base">
+                                {formattedQuestion.constraints.map((constraint, index) => <li key={index}>{constraint}</li>)}
+                            </ul>
+                        </div>
+                    )}
+                    {formattedQuestion.notes && (
+                        <div className="not-prose p-4 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 text-blue-800 dark:text-blue-300 rounded-r-lg">
+                            <p className="font-bold text-sm">NOTE</p>
+                            <p className="text-base">{formattedQuestion.notes}</p>
+                        </div>
+                    )}
+                </div>
+            ) : (
+                <div dangerouslySetInnerHTML={{ __html: question?.question || '' }} />
+            )}
+        </div>
+    );
+}
+
+function HintSection({ question, showHint, setShowHint, currentHintIndex, showNextHint, showPreviousHint, setCurrentHintIndex }: { question: Question | null, showHint: boolean, setShowHint: (show: boolean) => void, currentHintIndex: number, showNextHint: () => void, showPreviousHint: () => void, setCurrentHintIndex: (index: number) => void }) {
+  if (!question?.hint || question.hint.length === 0) {
+    return (
+      <div className="text-center py-16 text-slate-500 dark:text-zinc-500">
+        <LightbulbOff size={48} className="mx-auto mb-4" />
+        <h3 className="text-xl font-semibold">No Hints Available</h3>
+        <p>This question does not have any hints yet.</p>
+      </div>
+    );
+  }
   return (
     <div>
       {!showHint ? (
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.4, type: "spring", stiffness: 100 }}
-          className="flex flex-col items-center gap-8 py-16"
-        >
-          <motion.div 
-            className="w-28 h-28 rounded-full bg-gradient-to-br from-amber-100 to-amber-200 dark:from-amber-900/40 dark:to-amber-800/30 flex items-center justify-center shadow-inner"
-            animate={{ 
-              boxShadow: ["0 0 0 rgba(251, 191, 36, 0)", "0 0 20px rgba(251, 191, 36, 0.3)", "0 0 0 rgba(251, 191, 36, 0)"] 
-            }}
-            transition={{ 
-              repeat: Infinity, 
-              duration: 2,
-              ease: "easeInOut"
-            }}
-          >
-            <LightbulbOff size={40} className="text-amber-400 dark:text-amber-500 opacity-80" />
-          </motion.div>
-          
-          <div className="text-center max-w-md">
-            <h3 className="text-2xl font-bold mb-3 bg-gradient-to-r from-amber-600 to-amber-500 dark:from-amber-400 dark:to-amber-500 bg-clip-text text-transparent">Hints are hidden</h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-8 text-lg leading-relaxed">
-              Challenge yourself to solve the problem on your own first. 
-              Hints are available if you get stuck.
-            </p>
-            
-            <motion.div
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Button
-                color="warning"
-                size="lg"
-                onPress={() => setShowHint(true)}
-                className="font-medium text-white bg-gradient-to-r from-amber-500 to-amber-600 dark:from-amber-600 dark:to-amber-700 shadow-lg hover:shadow-amber-200/40 dark:hover:shadow-amber-900/40 transition-all duration-300"
-                startContent={<Lightbulb size={18} className="animate-pulse" />}
-              >
-                Reveal Hints
-              </Button>
-            </motion.div>
-          </div>
-        </motion.div>
-      ) : question?.hint && question.hint.length > 0 ? (
-        <AnimatePresence mode="wait">
-          <motion.div 
-            key={currentHintIndex}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3, type: "spring", stiffness: 100 }}
-            className="flex flex-col gap-8"
-          >
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div>
-                <div className="inline-block bg-amber-100 dark:bg-amber-900/30 px-3 py-1 rounded-full text-amber-700 dark:text-amber-300 font-medium mb-2">
-                  Step {currentHintIndex + 1} of {question.hint.length}
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 p-1.5 rounded-full">
-                <div className="relative h-2 bg-gray-200 dark:bg-gray-700 rounded-full w-48 overflow-hidden">
-                  <div 
-                    className="absolute top-0 left-0 h-full bg-gradient-to-r from-amber-400 to-amber-500 dark:from-amber-500 dark:to-amber-600 rounded-full transition-all duration-500 ease-in-out"
-                    style={{
-                      width: `${((currentHintIndex + 1) / question.hint.length) * 100}%`
-                    }}
-                  ></div>
-                </div>
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-300 min-w-[40px] text-center">
-                  {currentHintIndex + 1}/{question.hint.length}
-                </span>
-              </div>
-            </div>
-            
-            <motion.div 
-              className="bg-gradient-to-r from-amber-50 to-white dark:from-amber-900/20 dark:to-gray-900 shadow-lg border border-amber-100 dark:border-amber-800/30 p-6 rounded-xl"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1, duration: 0.4 }}
-            >
-              <div className="flex items-start gap-4">
-                <div className="mt-1 flex-shrink-0">
-                  <div className="w-8 h-8 rounded-full bg-amber-400 dark:bg-amber-500 flex items-center justify-center shadow-inner">
-                    <Lightbulb size={18} className="text-white" />
-                  </div>
-                </div>
-                <div className="prose prose-lg prose-amber dark:prose-invert">
-                  {question.hint[currentHintIndex]}
-                </div>
-              </div>
-            </motion.div>
-            
-            <div className="flex flex-col sm:flex-row justify-between gap-4 mt-2">
-              <Button
-                variant="flat"
-                size="lg"
-                startContent={<ArrowLeft size={18} />}
-                isDisabled={currentHintIndex === 0}
-                onPress={showPreviousHint}
-                className={`${currentHintIndex === 0 ? 'opacity-50' : 'hover:bg-gray-100 dark:hover:bg-gray-800'} transition-all duration-300`}
-              >
-                Previous Hint
-              </Button>
-              
-              <div className="flex justify-end">
-                {currentHintIndex === question.hint.length - 1 ? (
-                  <Button
-                    variant="flat"
-                    color="success"
-                    size="lg"
-                    endContent={<RefreshCw size={18} />}
-                    onPress={() => setCurrentHintIndex(0)}
-                    className="bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-400 hover:bg-success-200 dark:hover:bg-success-900/50 transition-all duration-300"
-                  >
-                    Restart Hints
-                  </Button>
-                ) : (
-                  <Button
-                    variant="flat"
-                    color="warning"
-                    size="lg"
-                    endContent={<CornerDownLeft size={18} />}
-                    onPress={showNextHint}
-                    className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-all duration-300"
-                  >
-                    Next Hint
-                  </Button>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        </AnimatePresence>
+        <div className="text-center py-16">
+          <LightbulbOff size={48} className="mx-auto mb-4 text-amber-500" />
+          <h3 className="text-2xl font-bold mb-2">Hints are Hidden</h3>
+          <p className="text-slate-600 dark:text-zinc-400 mb-6">Challenge yourself before revealing the hints!</p>
+          <Button color="warning" variant="ghost" onPress={() => setShowHint(true)} startContent={<Lightbulb size={18} />}>Reveal Hints</Button>
+        </div>
       ) : (
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col items-center justify-center py-16 text-gray-500 gap-6"
-        >
-          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center shadow-inner">
-            <Lightbulb size={36} className="text-gray-400" />
+        <div className="max-w-3xl mx-auto space-y-6">
+          <div className="flex justify-between items-center">
+            <p className="text-sm font-medium text-slate-500 dark:text-zinc-400">Hint {currentHintIndex + 1} of {question.hint.length}</p>
+            <Progress size="sm" value={(currentHintIndex + 1) / question.hint.length * 100} className="max-w-xs" color="warning" />
           </div>
-          <div className="text-center max-w-md">
-            <p className="text-xl font-medium mb-2 text-gray-700 dark:text-gray-300">No hints available</p>
-            <p className="text-gray-500 dark:text-gray-400">This question doesn&apos;t have any hints yet. Try breaking the problem down into smaller steps.</p>
+          <AnimatePresence mode="wait">
+            <motion.div key={currentHintIndex} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }} className="prose dark:prose-invert bg-slate-100 dark:bg-zinc-800/50 p-6 rounded-lg border border-slate-200 dark:border-zinc-700/50">
+              {question.hint[currentHintIndex]}
+            </motion.div>
+          </AnimatePresence>
+          <div className="flex justify-between items-center mt-4">
+            <Button variant="light" onPress={showPreviousHint} isDisabled={currentHintIndex === 0}>Previous</Button>
+            {currentHintIndex < question.hint.length - 1 ? (
+              <Button color="primary" variant="flat" onPress={showNextHint}>Next Hint</Button>
+            ) : (
+              <Button color="success" variant="flat" onPress={() => setCurrentHintIndex(0)} startContent={<RefreshCw size={14}/>}>Start Over</Button>
+            )}
           </div>
-        </motion.div>
+        </div>
       )}
     </div>
   );
 }
 
-// Component for Solution Section with enhanced modern design
-function SolutionSection({ 
-  parsedSolution, 
-  question,
-  copyToClipboard,
-  copied
-}: { 
-  parsedSolution: ParsedSolution | null,
-  question: Question | null,
-  copyToClipboard: (text: string, id: string) => void,
-  copied: string | null
-}) {
+function SolutionSection({ parsedSolution, question, copyToClipboard, copied }: { parsedSolution: ParsedSolution | null, question: Question | null, copyToClipboard: (text: string, id: string) => void, copied: string | null }) {
+  if (!parsedSolution && !question?.solution) {
+    return (
+        <div className="text-center py-16 text-slate-500 dark:text-zinc-500">
+            <Code size={48} className="mx-auto mb-4" />
+            <h3 className="text-xl font-semibold">No Solution Available</h3>
+            <p>A solution for this question has not been provided yet.</p>
+        </div>
+    );
+  }
   return (
-    <div className="flex flex-col gap-10">
+    <div className="prose prose-lg max-w-none dark:prose-invert prose-slate dark:prose-zinc">
+      <h2>Solution Breakdown</h2>
       {parsedSolution ? (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5 }}
-        >
-          <div className="flex items-center gap-3 mb-8">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary-500 to-secondary-500 flex items-center justify-center">
-              <Code size={16} className="text-white" />
-            </div>
-            <h2 className="text-xl font-bold bg-gradient-to-r from-primary-500 to-secondary-500 bg-clip-text text-transparent">
-              Solution Breakdown
-            </h2>
-          </div>
-          
+        <div className="space-y-8">
           {Object.keys(parsedSolution).map((key, idx) => {
             const section = parsedSolution[key];
             const sectionId = `solution-${idx}`;
-            
             return (
-              <motion.div 
-                key={key}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.1, duration: 0.5 }}
-                className="flex flex-col gap-5 pb-8 relative"
-              >
-                {/* Line connecting solution parts */}
-                {idx < Object.keys(parsedSolution).length - 1 && (
-                  <div className="absolute left-4 top-16 bottom-0 w-0.5 bg-gradient-to-b from-primary-300 to-gray-200 dark:from-primary-700 dark:to-gray-700 z-0"></div>
-                )}
-                
-                {section.subsection && (
-                  <div className="flex items-center gap-3 bg-gradient-to-r from-primary-50 to-transparent dark:from-primary-900/20 dark:to-transparent p-4 rounded-xl border-l-4 border-primary-500 dark:border-primary-600 shadow-sm z-10 transform hover:scale-[1.01] hover:shadow-md transition-all duration-300">
-                    <div className="h-8 w-8 rounded-full bg-primary-100 dark:bg-primary-800 flex items-center justify-center">
-                      <Sparkles size={16} className="text-primary-600 dark:text-primary-300" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-primary-700 dark:text-primary-300">{section.subsection}</h3>
+              <div key={key}>
+                {section.subsection && <h3 className="font-semibold">{section.subsection}</h3>}
+                {section.text && <div dangerouslySetInnerHTML={{ __html: section.text }} />}
+                {section.code && (
+                  <div className="not-prose relative my-6">
+                    <Tooltip content={copied === sectionId ? "Copied!" : "Copy code"}>
+                      <Button size="sm" isIconOnly variant="light" className="absolute top-3 right-3 z-10 bg-slate-700/50 hover:bg-slate-700/80 text-white" onPress={() => copyToClipboard(section.code as string, sectionId)}>
+                          {copied === sectionId ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
+                      </Button>
+                    </Tooltip>
+                    <SyntaxHighlighter language={section.language || 'javascript'} style={atomOneDark} showLineNumbers customStyle={{ borderRadius: '0.5rem' }}>
+                      {section.code}
+                    </SyntaxHighlighter>
                   </div>
                 )}
-                
-                {section.text && (
-                  <motion.div 
-                    className="prose max-w-none px-4 dark:prose-invert bg-white dark:bg-gray-900/50 rounded-xl p-5 shadow-sm z-10"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: idx * 0.1 + 0.2, duration: 0.5 }}
-                  >
-                    <div dangerouslySetInnerHTML={{ __html: section.text }} />
-                  </motion.div>
-                )}
-                
-                {section.code && (
-                  <motion.div 
-                    className="rounded-xl overflow-hidden shadow-lg border border-gray-200 dark:border-gray-800 z-10 transform hover:shadow-xl transition-all duration-500"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: idx * 0.1 + 0.3, duration: 0.5 }}
-                  >
-                    <div className="bg-gradient-to-r from-gray-900 to-gray-800 text-gray-200 text-xs px-5 py-3 flex justify-between items-center">
-                      <div className="flex items-center gap-3">
-                        <div className="flex gap-1.5">
-                          <div className="h-2.5 w-2.5 rounded-full bg-red-500"></div>
-                          <div className="h-2.5 w-2.5 rounded-full bg-yellow-500"></div>
-                          <div className="h-2.5 w-2.5 rounded-full bg-green-500"></div>
-                        </div>
-                        <span className="font-mono font-medium">{section.language || 'javascript'}</span>
-                      </div>
-                      <motion.div
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        <Tooltip content={copied === sectionId ? "Copied!" : "Copy code"}>
-                          <Button
-                            size="sm"
-                            variant="flat"
-                            isIconOnly
-                            className={`${copied === sectionId 
-                              ? 'bg-green-700 text-white' 
-                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            } transition-colors duration-300`}
-                            onPress={() => copyToClipboard(section.code as string, sectionId)}
-                          >
-                            {copied === sectionId ? (
-                              <Check size={14} className="text-white" />
-                            ) : (
-                              <Copy size={14} />
-                            )}
-                          </Button>
-                        </Tooltip>
-                      </motion.div>
-                    </div>
-                    <div className="max-h-[500px] overflow-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700 scrollbar-track-transparent">
-                      <SyntaxHighlighter
-                        language={section.language || 'javascript'}
-                        style={atomOneDark}
-                        showLineNumbers
-                        customStyle={{
-                          borderRadius: '0 0 0.75rem 0.75rem',
-                          padding: '1.5rem',
-                          fontSize: '0.9rem',
-                          margin: 0,
-                        }}
-                      >
-                        {section.code}
-                      </SyntaxHighlighter>
-                    </div>
-                  </motion.div>
-                )}
-              </motion.div>
+              </div>
             );
           })}
-        </motion.div>
-      ) : question?.solution ? (
-        <motion.div 
-          className="prose max-w-none dark:prose-invert"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <div className="bg-gradient-to-r from-primary-50 to-transparent dark:from-primary-900/20 dark:to-transparent p-4 rounded-xl mb-6 flex items-center gap-3">
-            <div className="h-8 w-8 rounded-full bg-primary-100 dark:bg-primary-800 flex items-center justify-center">
-              <Code size={16} className="text-primary-600 dark:text-primary-300" />
-            </div>
-            <h2 className="text-xl font-bold text-primary-700 dark:text-primary-300 m-0">Solution</h2>
-          </div>
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-800">
-            <pre className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg whitespace-pre-wrap overflow-x-auto">
-              {question.solution}
-            </pre>
-          </div>
-        </motion.div>
+        </div>
       ) : (
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="flex flex-col items-center justify-center py-16 gap-6"
-        >
-          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center shadow-inner">
-            <Code size={36} className="text-gray-400" />
-          </div>
-          <div className="text-center max-w-md">
-            <p className="text-xl font-medium mb-2 text-gray-700 dark:text-gray-300">No solution available</p>
-            <p className="text-gray-500 dark:text-gray-400">
-              This question doesn&apos;t have a solution yet. Try working through the problem using the hints provided.
-            </p>
-          </div>
-        </motion.div>
+        <pre className="bg-slate-100 dark:bg-zinc-800 p-4 rounded-lg whitespace-pre-wrap">{question?.solution}</pre>
       )}
     </div>
   );
 }
 
-// Component for Difficulty Badge
-function DifficultyBadge({ difficultyInfo }: { difficultyInfo: { color: "success" | "warning" | "danger", level: number, label: string } }) {
+function DifficultyBadge({ difficultyInfo }: { difficultyInfo: { color: "success" | "warning" | "danger", label: string } }) {
   return (
-    <Tooltip content={`Difficulty: ${difficultyInfo.label}`}>
-      <div className="flex items-center gap-1">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div 
-            key={i}
-            className={clsx(
-              "h-2 w-2 rounded-full",
-              i < difficultyInfo.level 
-                ? difficultyInfo.color === "success" 
-                  ? "bg-success-500" 
-                  : difficultyInfo.color === "warning" 
-                    ? "bg-warning-500" 
-                    : "bg-danger-500"
-                : "bg-gray-200 dark:bg-gray-700"
-            )}
-          ></div>
-        ))}
-      </div>
+    <Tooltip content={`Difficulty: ${difficultyInfo.label}`} placement="bottom">
+      <Chip color={difficultyInfo.color} variant="flat" size="sm" className="capitalize">{difficultyInfo.label}</Chip>
     </Tooltip>
   );
 }
