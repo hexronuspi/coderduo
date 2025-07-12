@@ -234,7 +234,7 @@ export default function QuestionUpload({
                             isDisabled={!title.trim() || !questionContent.trim() || currentCredits < 1}
                             className="font-bold text-base bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/20 data-[hover=true]:scale-105 transition-transform"
                         >
-                            Generate with AI (1 Credit)
+                            Generate (1 Credit)
                         </Button>
                     </div>
                 </form>
