@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Modal,
   ModalContent,
@@ -33,46 +33,40 @@ export function CreditModal({
   isOpen,
   onClose,
   userId,
-  // currentCredits,
   onCreditsUpdated,
   selectedPackId
 }: CreditModalProps) {
   const [creditPacks, setCreditPacks] = useState<Plan[]>([]);
-  const [selectedPack, setSelectedPack] = useState<string | undefined>(selectedPackId);
+  const [, setSelectedPack] = useState<string | undefined>(selectedPackId);
   const [isLoading, setIsLoading] = useState(false);
-  const [processingPackId, setProcessingPackId] = useState<string | null>(null);
+  // NEW: State to hold the pack details after the user clicks "Buy" and the modal starts closing.
+  const [pendingPurchase, setPendingPurchase] = useState<Plan | null>(null);
   const [userName, setUserName] = useState<string>("");
   const [userEmail, setUserEmail] = useState<string>("");
   const supabase = createSupabaseBrowserClient();
   const toast = useToast();
-  // State for managing toast visibility - currently managed by toast component
 
   // Load credit packs and user information
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
       try {
-        // Preload Razorpay script for faster checkout experience
         loadRazorpayScript().catch(err => console.error("Failed to preload Razorpay:", err));
         
-        // Fetch credit packs
         const packs = await fetchCreditPacks();
         setCreditPacks(packs);
         
-        // Set the default selected pack to the provided ID or the first pack
         if (selectedPackId) {
           setSelectedPack(selectedPackId);
         } else if (packs.length > 0) {
           setSelectedPack(packs[0].id);
         }
 
-        // Fetch user information for payment
         const { data: { user } } = await supabase.auth.getUser();
         if (user?.email) {
           setUserEmail(user.email);
         }
 
-        // Fetch additional user data like name
         const { data: userData, error: userError } = await supabase
           .from('users')
           .select('name, email')
@@ -81,7 +75,6 @@ export function CreditModal({
 
         if (!userError && userData) {
           setUserName(userData.name || "User");
-          // If email wasn't set from auth, use it from the database
           if (!user?.email && userData.email) {
             setUserEmail(userData.email);
           }
@@ -98,12 +91,9 @@ export function CreditModal({
     }
   }, [isOpen, selectedPackId, supabase, userId]);
 
-  // No longer needed as we're using direct purchase
-
-  // Calculate best value pack (lowest price per credit)
+  // Calculate best value pack
   const getBestValuePack = () => {
     if (creditPacks.length === 0) return null;
-    
     return creditPacks.reduce((best, current) => {
       const bestValue = best.price / best.credits;
       const currentValue = current.price / current.credits;
@@ -113,51 +103,31 @@ export function CreditModal({
   
   const bestValuePack = getBestValuePack();
 
-  // Handle direct purchase on both mobile and desktop
-  const handleDirectPurchase = async (pack: Plan) => {
+  // MOVED: The payment logic is now in its own function to be called by the useEffect hook.
+  const initiateRazorpayPayment = useCallback(async (pack: Plan) => {
     try {
       console.log("Starting payment process for pack:", pack);
-      setSelectedPack(pack.id);
-      
-      // Process payments directly in the modal for both mobile and desktop
-      // No redirection needed anymore
-      console.log("Processing payment in modal for all devices");
-      
-      // Create order on server
+      // NOTE: setIsLoading might control a global loader, so we keep it.
+      // It won't show in the modal as it's already closed.
       setIsLoading(true);
       
       let orderData;
       try {
         const orderResponse = await fetch('/api/payment/razorpay/create', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             packId: pack.id,
             amount: pack.price,
             planId: pack.id,
             credits: pack.credits,
-            notes: {
-              userId: userId,
-              packName: pack.name,
-              credits: pack.credits,
-              packId: pack.id
-            }
+            notes: { userId: userId, packName: pack.name, credits: pack.credits, packId: pack.id }
           }),
         });
 
         if (!orderResponse.ok) {
           const errorData = await orderResponse.json();
-          console.error("Payment API error:", errorData);
-          
-          // Show appropriate error message based on response
-          if (errorData.message) {
-            toast.error("Payment Error", errorData.message);
-          } else {
-            toast.error("Payment Error", `Failed to create payment order (${orderResponse.status})`);
-          }
-          
+          toast.error("Payment Error", errorData.message || `Failed to create payment order (${orderResponse.status})`);
           setIsLoading(false);
           return;
         }
@@ -165,68 +135,37 @@ export function CreditModal({
         orderData = await orderResponse.json();
         
         if (!orderData || !orderData.razorpayOrderId) {
-          console.error("Failed to create order:", orderData);
-          toast.error("Payment Setup Failed", orderData.error || "Failed to create payment order. Please try again.");
+          toast.error("Payment Setup Failed", orderData.error || "Failed to create payment order.");
           setIsLoading(false);
           return;
         }
-      } catch (error) {
-        console.error("Payment initialization error:", error);
-        toast.error("Connection Error", "Could not connect to the payment service. Please check your internet connection and try again.");
+      } catch{
+        toast.error("Connection Error", "Could not connect to the payment service.");
         setIsLoading(false);
         return;
       }
       
-      console.log("Order created:", orderData);
-      
-      // Check if Razorpay is loaded
       if (!window.Razorpay) {
-        console.error("Razorpay not loaded!");
-        toast.error("Payment Error", "Payment gateway not available. Please refresh the page and try again.");
+        toast.error("Payment Error", "Payment gateway not available. Please refresh and try again.");
         return;
       }
       
-      // Configure Razorpay options with mobile-optimized settings
       const options: RazorpayOptions = {
-        key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_Y6gGTPKFwvRnJu",
+        key: orderData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
         amount: orderData.amount,
         currency: orderData.currency || "INR",
         name: "Coder Duo",
         description: `${pack.name} - ${pack.credits} Credits`,
         order_id: orderData.razorpayOrderId,
-        prefill: {
-          name: userName || "User",
-          email: userEmail || "user@example.com",
-        },
-        notes: {
-          userId: userId,
-          packId: pack.id,
-          credits: pack.credits,
-          orderId: orderData.orderId
-        },
-        theme: {
-          color: '#6366F1',
-        },
-        // Added mobile optimized settings
-        readonly: {
-          email: true,
-          name: true
-        },
-        retry: {
-          enabled: false // Disable automatic retries to prevent issues
-        },
+        prefill: { name: userName || "User", email: userEmail || "" },
+        notes: { userId: userId, packId: pack.id, credits: pack.credits, orderId: orderData.orderId },
+        theme: { color: '#6366F1' },
         handler: async function(response: RazorpaySuccessResponse) {
-          console.log("Payment successful, verifying...", response);
-          
+          setIsLoading(true);
           try {
-            setIsLoading(true);
-            
-            // Verify payment
             const verificationResponse = await fetch('/api/payment/razorpay/verify', {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_order_id: response.razorpay_order_id,
@@ -237,165 +176,61 @@ export function CreditModal({
               }),
             });
 
-            // Parse verification response
             const verificationData = await verificationResponse.json();
             
             if (verificationData.success) {
-              // Show success message
-              toast.success(
-                "Payment Successful",
-                `${pack.credits} credits have been added to your account!`
-              );
-              
-              // Update the local state with new credits
+              toast.success("Payment Successful", `${pack.credits} credits have been added!`);
               if (onCreditsUpdated && verificationData.credits) {
                 onCreditsUpdated(verificationData.credits);
               }
-              
-              // Close the modal
-              onClose();
+              // REMOVED: onClose() is no longer needed here as the modal is already closed.
             } else {
-              // Show error message - payment processed but verification failed
-              console.error("Payment verification failed:", verificationData);
-              
-              // Handle common errors
-              if (verificationData.error && verificationData.error.includes('Unauthorized - Invalid or missing service key')) {
-                console.warn("Service key error detected:", verificationData.error);
-                
-                // Show a more positive message as payment likely succeeded
-                toast.success(
-                  "Payment Complete",
-                  "Your payment was successful. Your credits will be updated shortly."
-                );
-                
-                // Close the modal
-                onClose();
-              } else {
-                toast.warning(
-                  "Payment Received",
-                  "Your payment was successful, but there was an issue updating your credits. Our team will review and update your account shortly."
-                );
-              }
+              toast.warning("Payment Received", "Your payment was successful, but verification is pending. Our team will update your account shortly.");
             }
-          } catch (error) {
-            console.error("Error in payment verification:", error);
-            
-            // Check for network related errors that are common on mobile
-            if ((error as {name?: string})?.name === 'AbortError' || 
-                (error as {message?: string})?.message?.includes('network') ||
-                (error as {message?: string})?.message?.includes('timeout')) {
-              toast.warning(
-                "Verification Timeout", 
-                "Your payment was received but verification is taking longer than expected. Your credits will be updated shortly."
-              );
-            } else {
-              toast.warning(
-                "Payment Verification Error", 
-                "Your payment may have been successful but we couldn't verify it. Please contact support if credits are not added."
-              );
-            }
+          } catch {
+            toast.warning("Payment Verification Error", "Your payment may have been successful but we couldn't verify it. Please contact support.");
           } finally {
             setIsLoading(false);
-            // Set processing pack ID back to null
-            setProcessingPackId(null);
           }
         },
         modal: {
           ondismiss: function() {
-            console.log("Payment modal dismissed");
             toast.info("Payment Cancelled", "You have cancelled the payment process.");
-            setProcessingPackId(null);
             setIsLoading(false);
           },
-          // Added optimizations for mobile
-          escape: false, // Prevent accidental closes on mobile
-          animation: true, // Enable animations for better UX
-          backdropclose: false // Prevent closing by tapping outside (avoid accidental dismissals)
+          escape: false,
+          backdropclose: false
         }
       };
-
-      // Initialize and open Razorpay
-      console.log("Opening Razorpay with options:", { key: options.key, order_id: options.order_id });
       
-      if (window.Razorpay) {
-        try {
-          const razorpay = new window.Razorpay(options);
-          
-          // Add error listeners for better error handling, especially important on mobile
-          razorpay.on('payment.error', function(resp: unknown) {
-            console.error("Razorpay payment error:", resp);
-            toast.error(
-              "Payment Failed", 
-              (resp as {error?: {description?: string}})?.error?.description || "There was an error processing your payment. Please try again."
-            );
-            setProcessingPackId(null);
-            setIsLoading(false);
-          });
-          
-          // Open the payment window
-          razorpay.open();
-        } catch (openError) {
-          console.error("Error opening Razorpay:", openError);
-          toast.error(
-            "Payment Error", 
-            "Could not open payment window. Please refresh and try again."
-          );
-          setProcessingPackId(null);
-          setIsLoading(false);
-        }
-      } else {
-        toast.error("Payment Error", "Payment gateway not available. Please refresh the page and try again.");
-        setProcessingPackId(null);
+      const razorpay = new window.Razorpay(options);
+      razorpay.on('payment.error', function(resp: unknown) {
+        toast.error("Payment Failed", (resp as {error?: {description?: string}})?.error?.description || "An error occurred.");
         setIsLoading(false);
-      }
+      });
+      razorpay.open();
       
     } catch (error) {
-      console.error("Error in handleDirectPurchase:", error);
-      toast.error("Payment Error", "There was an error initiating the payment. Please try again.");
-      setProcessingPackId(null);
+      console.error("Error in initiateRazorpayPayment:", error);
+      toast.error("Payment Error", "An unexpected error occurred. Please try again.");
       setIsLoading(false);
     }
-  };
+  }, [userId, userName, userEmail, onCreditsUpdated, toast]); // Dependencies for the payment function
 
-  // Handle potential network connectivity issues on mobile
+  // NEW: This useEffect hook waits for the modal to close before initiating payment.
   useEffect(() => {
-    let networkReconnectHandler: EventListener | null = null;
-    
-    // If we're loading a payment, set up a network reconnection handler
-    if (isLoading && processingPackId) {
-      networkReconnectHandler = () => {
-        console.log("Network reconnected, refreshing payment status");
-        
-        // Find the pack we were processing
-        const packBeingProcessed = creditPacks.find(p => p.id === processingPackId);
-        
-        // If we can find the pack, we might want to retry or refresh
-        if (packBeingProcessed) {
-          toast.info(
-            "Network Connection Restored",
-            "Refreshing payment status..."
-          );
-          
-          // Give a brief moment for the connection to stabilize
-          setTimeout(() => {
-            // Reset loading state to allow user to try again
-            setIsLoading(false);
-            setProcessingPackId(null);
-          }, 1500);
-        }
-      };
+    // Check if the modal has just been closed AND a purchase is pending.
+    if (!isOpen && pendingPurchase) {
+      console.log("Modal is unmounted, proceeding with Razorpay for:", pendingPurchase.name);
       
-      // Listen for online event (when device reconnects to network)
-      window.addEventListener('online', networkReconnectHandler);
+      // Initiate the payment process.
+      initiateRazorpayPayment(pendingPurchase);
+      
+      // IMPORTANT: Reset the pending purchase state to prevent this from re-running.
+      setPendingPurchase(null);
     }
-    
-    // Clean up event listener
-    return () => {
-      if (networkReconnectHandler) {
-        window.removeEventListener('online', networkReconnectHandler);
-      }
-    };
-  }, [isLoading, processingPackId, creditPacks, toast]);
+  }, [isOpen, pendingPurchase, initiateRazorpayPayment]);
+
 
   return (
     <Modal 
@@ -415,7 +250,7 @@ export function CreditModal({
           </ModalHeader>
           <Divider />
           <ModalBody>
-            {isLoading ? (
+            {isLoading && !creditPacks.length ? (
               <div className="flex justify-center items-center h-40">
                 <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary-500"></div>
               </div>
@@ -428,19 +263,14 @@ export function CreditModal({
                 {creditPacks.map((pack) => {
                   const isBestValue = bestValuePack?.id === pack.id;
                   const pricePerCredit = Math.round((pack.price / pack.credits) * 100) / 100;
-                  
                   const pointsArray = pack.description.split('\n').filter(p => p.trim().length > 0);
                   
                   return (
-                    <Card 
-                      key={pack.id} 
-                      className={`w-full border hover:border-primary-500 transition-all ${
-                        selectedPack === pack.id ? 'border-primary-500 shadow-md' : 'border-gray-200'
-                      } ${isBestValue ? "bg-primary-50" : ""}`}
-                    >
+                    <Card key={pack.id} className={`...`}>
                       <CardBody className="p-4">
                         <div className="flex flex-col h-full">
-                          <div className="flex items-center justify-between mb-2">
+                          {/* ... Card content ... */}
+                                                    <div className="flex items-center justify-between mb-2">
                             <h3 className="text-lg font-semibold">{pack.name}</h3>
                             {isBestValue && (
                               <span className="bg-primary-100 text-primary-700 text-xs font-medium px-2 py-0.5 rounded">
@@ -464,19 +294,19 @@ export function CreditModal({
                               ))}
                             </ul>
                           </div>
-                          
+
+                          {/* CHANGED: This button now sets state and closes the modal. */}
                           <Button 
                             color="primary" 
                             className="w-full mt-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-medium shadow-md"
                             onPress={() => {
-                              setProcessingPackId(pack.id);
-                              handleDirectPurchase(pack)
-                                .finally(() => setProcessingPackId(null));
+                              // 1. Set the pack to be purchased
+                              setPendingPurchase(pack);
+                              // 2. Immediately close the modal
+                              onClose();
                             }}
-                            isLoading={processingPackId === pack.id}
-                            disabled={processingPackId !== null && processingPackId !== pack.id}
                           >
-                            {processingPackId === pack.id ? "Processing..." : "Buy"}
+                            Buy
                           </Button>
                         </div>
                       </CardBody>
@@ -494,10 +324,7 @@ export function CreditModal({
           </ModalFooter>
         </>
       </ModalContent>
-      {/* Render the toast container here as well, to ensure it's visible */}
       <toast.ToastContainer />
     </Modal>
   );
 }
-
-
