@@ -234,7 +234,6 @@ const AcademicCodeEditor = () => {
       const indent = '  ';
       const newCode = value.substring(0, selectionStart) + indent + value.substring(selectionEnd);
       setCode(newCode);
-
       // Set cursor position after state update
       setTimeout(() => {
         if (textareaRef.current) {
