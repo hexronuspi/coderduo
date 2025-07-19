@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Button, Tooltip, Spinner, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Tabs, Tab } from "@nextui-org/react";
 import { 
@@ -238,9 +239,11 @@ const ContentArea = ({ activeTab, onTabChange, question, parsedSolution, current
  * Resizable and collapsible chat panel for desktop
  */
 const DesktopChatPanel = ({ question }: { question: UserQuestion }) => {
+
   const [isExpanded, setIsExpanded] = useState(true);
   const [width, setWidth] = useState(450);
   const isResizing = useRef(false);
+  const [panelMode, setPanelMode] = useState<'ai' | 'collaborator'>('ai');
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -271,8 +274,13 @@ const DesktopChatPanel = ({ question }: { question: UserQuestion }) => {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [handleMouseMove, handleMouseUp]);
-  
-  const safeChat = question.chat?.map(msg => ({ ...msg, role: (["user", "assistant", "system"].includes(msg.role) ? msg.role : "user") as "user" | "assistant" | "system" })) || [];
+
+  const safeChat = question.chat?.map(msg => ({ ...msg, role: (['user', 'assistant', 'system'].includes(msg.role) ? msg.role : 'user') as 'user' | 'assistant' | 'system' })) || [];
+
+  // Import AcademicCodeEditor dynamically to avoid SSR and lint issues
+  const AcademicCodeEditor = React.useMemo(() =>
+    dynamic(() => import('@/components/question-bank/collaborator'), { ssr: false })
+  , []);
 
   return (
     <motion.aside
@@ -284,7 +292,7 @@ const DesktopChatPanel = ({ question }: { question: UserQuestion }) => {
       <AnimatePresence>
         {isExpanded ? (
           <motion.div
-            key="chat-expanded"
+            key={panelMode}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1, transition: { delay: 0.1, duration: 0.2 } }}
             exit={{ opacity: 0, transition: { duration: 0.1 } }}
@@ -292,11 +300,33 @@ const DesktopChatPanel = ({ question }: { question: UserQuestion }) => {
           >
             <div onMouseDown={handleMouseDown} className="w-1.5 h-full absolute top-0 left-0 -translate-x-1/2 bg-transparent hover:bg-primary/50 active:bg-primary transition-colors duration-200 cursor-col-resize z-10" />
             <div className="flex-shrink-0 h-16 flex items-center justify-between px-4 border-b border-slate-200 dark:border-slate-800">
-              <div className="flex items-center gap-2"><MessageCircle size={20} className="text-primary" /><h2 className="text-lg font-semibold">AI Assistant</h2></div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant={panelMode === 'ai' ? 'flat' : 'light'}
+                  color={panelMode === 'ai' ? 'primary' : 'default'}
+                  className="mr-2"
+                  onPress={() => setPanelMode('ai')}
+                >
+                  <MessageCircle size={18} className="mr-1" />AI Assistant
+                </Button>
+                <Button
+                  size="sm"
+                  variant={panelMode === 'collaborator' ? 'flat' : 'light'}
+                  color={panelMode === 'collaborator' ? 'primary' : 'default'}
+                  onPress={() => setPanelMode('collaborator')}
+                >
+                  <BookOpen size={18} className="mr-1" />Collaborator
+                </Button>
+              </div>
               <Button isIconOnly variant="light" className="text-slate-500" onPress={() => setIsExpanded(false)} aria-label="Collapse Chat"><PanelRightClose size={20} /></Button>
             </div>
-            <div className="flex-grow overflow-hidden">
-              <ProblemChat question={{ ...question, chat: safeChat }} />
+            <div className="flex-grow overflow-auto">
+              {panelMode === 'ai' ? (
+                <ProblemChat question={{ ...question, chat: safeChat }} />
+              ) : (
+                AcademicCodeEditor ? <AcademicCodeEditor /> : null
+              )}
             </div>
           </motion.div>
         ) : (
